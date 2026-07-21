@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-dbt-warehouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate synthetic fixture data
+        run: python tests/generate_synthetic_data.py
+
+      - name: Load fixtures into DuckDB
+        env:
+          RAW_DIR: tests/fixtures/raw
+          DUCKDB_PATH: /tmp/ci_home_credit.duckdb
+        run: python scripts/load_raw_data.py
+
+      - name: dbt build (staging -> intermediate -> marts, with schema tests)
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/warehouse
+          DUCKDB_PATH: /tmp/ci_home_credit.duckdb
+        working-directory: warehouse
+        run: dbt build

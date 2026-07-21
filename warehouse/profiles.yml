@@ -1,0 +1,7 @@
+home_credit:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../data/home_credit.duckdb') }}"
+      threads: 4
