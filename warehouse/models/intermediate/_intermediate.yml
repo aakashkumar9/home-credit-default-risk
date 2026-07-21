@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: int_bureau_balance_agg
+    description: Bureau balance history aggregated from (sk_id_bureau, months_balance) up to sk_id_bureau grain.
+    columns:
+      - name: sk_id_bureau
+        data_tests:
+          - unique
+          - not_null
+
+  - name: int_bureau_agg
+    description: Credit bureau history aggregated to sk_id_curr grain - one row per applicant.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+
+  - name: int_previous_application_agg
+    description: Previous Home Credit application history aggregated to sk_id_curr grain.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+
+  - name: int_pos_cash_agg
+    description: POS/cash loan balance history aggregated to sk_id_curr grain.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+
+  - name: int_credit_card_agg
+    description: Credit card balance history aggregated to sk_id_curr grain.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+
+  - name: int_installments_agg
+    description: Instalment repayment history aggregated to sk_id_curr grain.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
