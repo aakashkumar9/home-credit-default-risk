@@ -1,0 +1,69 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      1:1 copies of the Home Credit Default Risk CSVs, loaded verbatim by
+      scripts/load_raw_data.py. No renaming, typing, or cleaning happens
+      before this layer - that's the job of staging.
+    schema: raw
+    tables:
+      - name: application_train
+        description: One row per loan application in the training set. Grain SK_ID_CURR. Carries TARGET.
+        columns:
+          - name: SK_ID_CURR
+            description: Applicant / current loan ID. Primary key of the applicant-level tables.
+            data_tests:
+              - unique
+              - not_null
+      - name: application_test
+        description: One row per loan application in the scoring set. Same schema as application_train minus TARGET. Grain SK_ID_CURR.
+        columns:
+          - name: SK_ID_CURR
+            data_tests:
+              - unique
+              - not_null
+      - name: bureau
+        description: All client credits reported to the credit bureau, one row per bureau credit. Grain SK_ID_BUREAU. Many-to-one with application on SK_ID_CURR.
+        columns:
+          - name: SK_ID_BUREAU
+            data_tests:
+              - unique
+              - not_null
+          - name: SK_ID_CURR
+            data_tests:
+              - not_null
+      - name: bureau_balance
+        description: Monthly balance snapshots of bureau credits. Grain (SK_ID_BUREAU, MONTHS_BALANCE). Many-to-one with bureau on SK_ID_BUREAU.
+        columns:
+          - name: SK_ID_BUREAU
+            data_tests:
+              - not_null
+      - name: previous_application
+        description: All previous applications for loans at Home Credit. Grain SK_ID_PREV. Many-to-one with application on SK_ID_CURR.
+        columns:
+          - name: SK_ID_PREV
+            data_tests:
+              - unique
+              - not_null
+          - name: SK_ID_CURR
+            data_tests:
+              - not_null
+      - name: pos_cash_balance
+        description: Monthly snapshots of previous point-of-sale / cash loans. Grain (SK_ID_PREV, MONTHS_BALANCE).
+        columns:
+          - name: SK_ID_PREV
+            data_tests:
+              - not_null
+      - name: credit_card_balance
+        description: Monthly snapshots of previous credit card loans. Grain (SK_ID_PREV, MONTHS_BALANCE).
+        columns:
+          - name: SK_ID_PREV
+            data_tests:
+              - not_null
+      - name: installments_payments
+        description: Repayment history for previous credits. Grain (SK_ID_PREV, NUM_INSTALMENT_NUMBER, NUM_INSTALMENT_VERSION).
+        columns:
+          - name: SK_ID_PREV
+            data_tests:
+              - not_null

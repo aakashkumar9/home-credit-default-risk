@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: mart_applicant_features
+    description: >
+      One row per applicant (sk_id_curr), joining the application record to
+      every aggregated slice of bureau, previous-application, POS/cash,
+      credit-card, and instalment history. This is the single feature table
+      the modeling layer reads - no other model or raw table should be
+      queried downstream of this one.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+      - name: target
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+              config:
+                where: "is_train"
+      - name: bureau_count
+        data_tests:
+          - not_null
+      - name: prev_app_count
+        data_tests:
+          - not_null
+      - name: pos_records_count
+        data_tests:
+          - not_null
+      - name: cc_records_count
+        data_tests:
+          - not_null
+      - name: inst_payments_count
+        data_tests:
+          - not_null

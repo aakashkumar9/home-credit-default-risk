@@ -1,0 +1,91 @@
+version: 2
+
+models:
+  - name: stg_application
+    description: Applicant grain (train + test unioned). One row per SK_ID_CURR.
+    columns:
+      - name: sk_id_curr
+        data_tests:
+          - unique
+          - not_null
+      - name: target
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+              config:
+                where: "is_train"
+
+  - name: stg_bureau
+    description: Bureau credit grain. Many-to-one with stg_application on sk_id_curr.
+    columns:
+      - name: sk_id_bureau
+        data_tests:
+          - unique
+          - not_null
+      - name: sk_id_curr
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_application')
+                field: sk_id_curr
+
+  - name: stg_bureau_balance
+    description: Monthly bureau credit status. Many-to-one with stg_bureau on sk_id_bureau.
+    columns:
+      - name: sk_id_bureau
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_bureau')
+                field: sk_id_bureau
+
+  - name: stg_previous_application
+    description: Previous Home Credit application grain. Many-to-one with stg_application on sk_id_curr.
+    columns:
+      - name: sk_id_prev
+        data_tests:
+          - unique
+          - not_null
+      - name: sk_id_curr
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_application')
+                field: sk_id_curr
+
+  - name: stg_pos_cash_balance
+    description: Monthly POS/cash balance snapshots. Many-to-one with stg_previous_application on sk_id_prev.
+    columns:
+      - name: sk_id_prev
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_previous_application')
+                field: sk_id_prev
+
+  - name: stg_credit_card_balance
+    description: Monthly credit card balance snapshots. Many-to-one with stg_previous_application on sk_id_prev.
+    columns:
+      - name: sk_id_prev
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_previous_application')
+                field: sk_id_prev
+
+  - name: stg_installments_payments
+    description: Instalment-level repayment history. Many-to-one with stg_previous_application on sk_id_prev.
+    columns:
+      - name: sk_id_prev
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_previous_application')
+                field: sk_id_prev
