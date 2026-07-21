@@ -16,16 +16,16 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e ".[dev]"
 
       - name: Generate synthetic fixture data
         run: python tests/generate_synthetic_data.py
 
       - name: Load fixtures into DuckDB
         env:
-          RAW_DIR: tests/fixtures/raw
+          DATA_RAW_DIR: tests/fixtures/raw
           DUCKDB_PATH: /tmp/ci_home_credit.duckdb
-        run: python scripts/load_raw_data.py
+        run: python -m home_credit.ingest.load_raw_data
 
       - name: dbt build (staging -> intermediate -> marts, with schema tests)
         env:
