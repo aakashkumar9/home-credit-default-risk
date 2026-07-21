@@ -1,0 +1,56 @@
+[project]
+name = "home-credit"
+version = "0.1.0"
+description = "Home Credit Default Risk: dbt/DuckDB aggregation pipeline, LightGBM/XGBoost modelling with calibration, SHAP explainability, FastAPI serving, and a Streamlit dashboard."
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "duckdb==1.5.4",
+    "dbt-core>=1.8,<1.11",
+    "dbt-duckdb>=1.8,<1.11",
+
+    "pandas>=2.2,<3",
+    "numpy>=1.26,<3",
+    "scikit-learn==1.9.0",
+    "lightgbm==4.7.0",
+    "xgboost==3.2.0",
+    "shap==0.51.0",
+    "matplotlib==3.11.1",
+    "joblib==1.5.3",
+
+    "mlflow==3.14.0",
+
+    "fastapi==0.139.2",
+    "uvicorn[standard]==0.51.0",
+    "pydantic==2.13.4",
+
+    "streamlit==1.60.0",
+
+    "pandera==0.32.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
+    "ruff==0.15.8",
+    "black==26.3.1",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

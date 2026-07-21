@@ -1,18 +1,77 @@
 # Home Credit Default Risk
 
-A default-risk pipeline built on the [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk)
-dataset: the applicant-level table alone is ~307k rows, but the real size is
-in the six related history tables it links to (credit bureau records,
-previous applications, POS/cash balances, credit card balances, instalment
-payments) - tens of millions of rows combined, all one-to-many against a
-single applicant.
+**Problem.** Predict whether a loan applicant will default (`TARGET = 1`,
+~8% of applicants) using the [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk)
+dataset. The applicant table alone is ~307k rows, but the real size - and
+the real engineering problem - is in six related history tables (credit
+bureau records, previous applications, POS/cash balances, credit card
+balances, instalment payments), tens of millions of rows combined, all
+one-to-many against a single applicant. Getting from "seven relational
+tables at different grains" to "one row per applicant, ready to fit a
+classifier" is a genuine data-engineering problem, and it's the part of
+this project that gets the most weight - the model on top of it is
+deliberately the less novel half.
 
-The pipeline is the point of this project, more than the model on top of
-it. Getting from "seven relational tables with different grains" to "one
-row per applicant, ready to fit a classifier" is a real data-engineering
-problem - schema design, join strategy, and one-to-many aggregation - and
-it's built as a tested, documented dbt project rather than a notebook full
-of `groupby().agg()` calls.
+**Status.** Built in phases, each reviewed before the next starts. See
+[Project status](#project-status) below for what's actually implemented
+right now vs. planned.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["data/raw/*.csv\n(Kaggle, not committed)"] --> B["home_credit.ingest"]
+    B --> C[("DuckDB\nraw schema")]
+    C --> D["dbt: staging\n(rename/type/clean)"]
+    D --> E["dbt: intermediate\n(one-to-many -> sk_id_curr)"]
+    E --> F["dbt: marts.mart_applicant_features\n(one row per applicant)"]
+    F --> V["home_credit.validation\n(pandera checks)"]
+    F --> G["home_credit.modeling\n(CV, imbalance handling, calibration)"]
+    G --> H[("MLflow\ntracking + model registry")]
+    G --> I["home_credit.explain\n(SHAP)"]
+    H --> J["home_credit.serving\nFastAPI /predict"]
+    I --> J
+    J --> K["dashboard\nStreamlit"]
+```
+
+## Project status
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Project scaffold (`src/` layout, `pyproject.toml`, Makefile, README) | done |
+| 2 | Data ingestion into DuckDB (`home_credit.ingest`) | pending |
+| 3 | dbt transformation layer (staging -> intermediate -> marts) | **done** (built pre-scaffold, see below) |
+| 4 | Feature engineering + EDA summary | pending |
+| 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | pending (an earlier single-split LightGBM version exists in the legacy `modeling/` package, superseded in this phase) |
+| 6 | Explainability (global + per-applicant SHAP) | pending (legacy global-only version exists in `modeling/explain.py`) |
+| 7 | Serving: FastAPI `/predict` + Streamlit dashboard | pending |
+| 8 | Docker, CI, data validation, monitoring/retraining notes | pending (basic CI exists, see below) |
+
+The dbt project (`warehouse/`) was built and validated first and already
+meets phase 3's bar as specified, so it isn't being redone - phases 2, 4-8
+build around it. The top-level `modeling/` package is an earlier iteration
+(single train/valid split, LightGBM only, no MLflow) kept in place until
+phase 5 replaces it with `src/home_credit/modeling` (cross-validated,
+both LightGBM and XGBoost, MLflow-tracked); it isn't the target architecture
+described above.
+
+## Repository layout
+
+```
+src/home_credit/       Installable package (pip install -e .)
+  config.py             Central paths/constants - everything else imports from here
+  ingest/                Phase 2: raw CSV -> DuckDB
+  validation/            Phase 8: pandera schemas
+  modeling/              Phase 5: feature prep, CV training, calibration, MLflow logging
+  explain/               Phase 6: SHAP
+  serving/               Phase 7: FastAPI app
+dashboard/               Phase 7: Streamlit app
+warehouse/               dbt project: staging -> intermediate -> marts (done)
+scripts/                 load_raw_data.py, build_warehouse.sh
+tests/                   pytest suite + synthetic fixture generator
+modeling/                Legacy pre-scaffold modelling code, superseded in phase 5
+data/raw/                Kaggle CSVs go here (gitignored)
+```
 
 ## Expected raw data
 
@@ -35,27 +94,7 @@ data/raw/installments_payments.csv
 (`HomeCredit_columns_description.csv` and `sample_submission.csv`, also in
 the Kaggle download, aren't used by anything here.)
 
-## Architecture
-
-```
-data/raw/*.csv (Kaggle)
-        |
-        v  scripts/load_raw_data.py
-   raw.*                    <- untouched 1:1 copy of each CSV
-        |
-        v  dbt (warehouse/models/staging)
-   staging.stg_*            <- renamed/typed, one model per source table,
-        |                      light cleaning (365243 DAYS_* sentinel -> null,
-        |                      sign-flipped day counts, safe-divide ratios)
-        v  dbt (warehouse/models/intermediate)
-   intermediate.int_*_agg   <- one-to-many history collapsed to sk_id_curr
-        |                      (or sk_id_bureau, one level down) grain
-        v  dbt (warehouse/models/marts)
-   marts.mart_applicant_features   <- one row per sk_id_curr: application
-        |                             + every aggregated history slice
-        v
-   modeling/                <- train -> calibrate -> explain -> evaluate -> predict
-```
+## The dbt pipeline (done)
 
 **Staging** (`warehouse/models/staging/`): one view per source table,
 renamed to consistent snake_case, with the dataset's known data-quality
@@ -101,89 +140,57 @@ enforcing every history table's foreign key actually exists in its parent
 (`warehouse/tests/assert_train_test_target_consistency.sql`) asserting
 training rows always have a label and scoring rows never do.
 
-## Modeling (`modeling/`)
-
-- **`train.py`** - LightGBM (`objective=binary`), with `scale_pos_weight`
-  (negative/positive count) handling the ~8% positive rate, and early
-  stopping on a held-out validation fold. `scale_pos_weight` was chosen over
-  resampling (SMOTE, random oversampling): it reweights the existing
-  gradient/hessian per class rather than fabricating synthetic rows in a
-  feature space built from subtle, correlated financial ratios, where
-  interpolating between real applicants is more likely to produce
-  unrealistic rows than reweighting is to mis-calibrate.
-- **`calibrate.py`** - `scale_pos_weight` fixes ranking (AUC) but skews the
-  raw predicted probabilities toward the minority class. Isotonic
-  regression (`sklearn.calibration.CalibratedClassifierCV` + `FrozenEstimator`),
-  fit on the same held-out fold used for early stopping, maps scores back to
-  well-calibrated probabilities without touching ranking.
-- **`explain.py`** - SHAP `TreeExplainer` on the underlying LightGBM model
-  (not the calibrated wrapper - see the module docstring for why),
-  producing `reports/shap_summary.png` and `reports/shap_feature_importance.csv`.
-- **`evaluate.py`** - ROC-AUC, PR-AUC, KS statistic, and a confusion matrix
-  at the F1-optimal threshold, written to `reports/evaluation_metrics.json`.
-- **`predict.py`** - scores `application_test` with the calibrated model and
-  writes a Kaggle-format `reports/submission.csv`.
-- **`run_pipeline.py`** - runs all of the above in order.
-
-`data.py` and `split.py` are shared: every stage reads the same
-feature-column list and the same train/valid split, so training,
-calibration, explanation, and evaluation can never silently disagree about
-what a "feature" is or which rows were held out.
-
 ## Setup
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+make setup        # pip install -e ".[dev]" - installs the src/home_credit package + dev tools
 
 # 1. place the Kaggle CSVs in data/raw/ (see "Expected raw data" above)
-
-# 2. build the warehouse: load raw CSVs -> dbt build (staging -> intermediate -> marts) -> dbt docs generate
-./scripts/build_warehouse.sh
-
-# 3. run the modeling pipeline end-to-end
-python -m modeling.run_pipeline
+make dbt-build     # load raw CSVs -> dbt build (staging -> intermediate -> marts) -> dbt docs generate
 ```
 
-Outputs land in `models/` (trained + calibrated model, feature metadata)
-and `reports/` (SHAP plot/table, evaluation metrics, Kaggle submission
-CSV) - both gitignored, regenerated by the commands above.
+Run `make` with no target (or open the `Makefile`) for the full command
+list - `train`, `serve-api`, `dashboard`, `test`, `lint` etc. land as their
+phases are built; right now `setup` and `dbt-build` are live.
 
 ### Trying it without the real dataset
 
 `tests/generate_synthetic_data.py` generates small, schema-faithful
 synthetic CSVs (proper referential integrity between `sk_id_curr`,
-`sk_id_bureau`, `sk_id_prev`) for all eight tables, so the whole pipeline
-can be exercised without the (non-redistributable) Kaggle download:
+`sk_id_bureau`, `sk_id_prev`) for all eight tables, so the pipeline can be
+exercised without the (non-redistributable) Kaggle download:
 
 ```bash
 python tests/generate_synthetic_data.py         # writes tests/fixtures/raw/
 RAW_DIR=tests/fixtures/raw DUCKDB_PATH=/tmp/dev.duckdb python scripts/load_raw_data.py
 DBT_PROFILES_DIR=warehouse DUCKDB_PATH=/tmp/dev.duckdb dbt build --project-dir warehouse
-DUCKDB_PATH=/tmp/dev.duckdb python -m modeling.run_pipeline
 ```
 
-This is exactly what CI (`.github/workflows/ci.yml`) does. `pytest tests/`
-runs against whatever DuckDB file `DUCKDB_PATH` points at (real or
-synthetic) and skips itself if that warehouse hasn't been built yet - it's
-an integration suite on top of the dbt build, not a replacement for it.
+This is exactly what CI (`.github/workflows/ci.yml`) does today; phase 8
+will extend it with lint and the full test suite once phases 2-7 land.
 
-## Design decisions / what's deliberately out of scope
+## Results
+
+_Filled in during phase 5 (baseline vs. LightGBM/XGBoost CV results,
+calibration curves) - not implemented yet._
+
+## Design decisions
 
 - **DuckDB, not Postgres/Snowflake.** Zero external services to provision;
   `dbt-duckdb` gives a real warehouse (schemas, materializations, tests,
   docs) against a single local file.
-- **`scale_pos_weight`, not SMOTE.** See `modeling/train.py`'s docstring -
-  reweighting composes cleanly with the calibration step that follows it;
-  resampling would need its own calibration correction on top.
-- **LightGBM over XGBoost.** Both are equally valid for this problem;
-  LightGBM's native pandas-categorical support avoids a separate encoding
-  step for the dataset's many string columns. Swapping in
-  `xgboost.XGBClassifier` (with `enable_categorical=True`) is a small,
-  contained change to `modeling/train.py` if preferred.
 - **Housing/building columns collapsed, not dropped or kept in full.** See
-  the staging section above - keeps the missingness signal without ~45
-  near-duplicate columns.
-- **No feature store / Airflow.** The project is scoped to one batch build;
-  orchestration beyond `scripts/build_warehouse.sh` would be solving a
-  problem this dataset doesn't have.
+  the dbt pipeline section above - keeps the missingness signal without
+  ~45 near-duplicate columns.
+- **`src/` package layout.** Keeps the installable library
+  (`home_credit`) separate from top-level scripts, tests, and the dbt
+  project, and makes `pip install -e .` unambiguous about what's a package.
+- **No feature store / Airflow.** The project is scoped to one batch
+  build; orchestration beyond `scripts/build_warehouse.sh` would be
+  solving a problem this dataset doesn't have.
+
+More decisions (imbalance handling, calibration method, LightGBM vs.
+XGBoost, monitoring/retraining approach) will be documented here as their
+phases land - see the legacy `modeling/` package's docstrings for the
+reasoning that phase 5 will carry forward.
