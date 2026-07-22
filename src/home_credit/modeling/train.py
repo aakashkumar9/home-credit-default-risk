@@ -13,6 +13,7 @@ import json
 
 import joblib
 import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -144,6 +145,20 @@ def train(duckdb_path: str | None = None) -> dict:
 
         joblib.dump(champion_model.sklearn_estimator, config.MODEL_DIR / "champion_model.joblib")
         joblib.dump(calibrated_model, config.MODEL_DIR / "calibrated_model.joblib")
+        # Also version the served model itself through MLflow's model registry - the
+        # joblib file above remains the fast, dependency-free path serving.py/dashboard
+        # actually load from, but the registry gives a versioned, queryable history of
+        # every calibrated model ever produced across runs (mlflow ui / mlflow models).
+        # serialization_format is pinned to cloudpickle rather than mlflow's default
+        # (skops) - skops isn't guaranteed to round-trip the LightGBM/XGBoost sklearn
+        # wrappers CalibratedClassifierCV can hold; cloudpickle matches what joblib.dump
+        # above already uses for the same object.
+        mlflow.sklearn.log_model(
+            calibrated_model,
+            name="calibrated_model",
+            registered_model_name=config.SERVING_MODEL_NAME,
+            serialization_format="cloudpickle",
+        )
         with open(config.MODEL_DIR / "feature_metadata.json", "w") as f:
             json.dump(
                 {
