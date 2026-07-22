@@ -1,4 +1,4 @@
-.PHONY: setup ingest dbt-build dbt-docs eda train serve-api dashboard test lint fmt docker-build docker-run
+.PHONY: setup ingest dbt-build dbt-docs eda train explain serve-api dashboard test lint fmt docker-build docker-run
 
 setup:  ## Install the package + dev tools (editable install)
 	pip install -e ".[dev]"
@@ -17,6 +17,9 @@ eda:  ## Regenerate docs/eda_summary.md from the built mart
 
 train:  ## Run the full modelling pipeline (CV, calibration, MLflow logging)
 	python -m home_credit.modeling.run_pipeline
+
+explain:  ## Regenerate reports/shap_summary.png + shap_feature_importance.csv from the trained champion
+	python -m home_credit.explain.shap_explainer
 
 serve-api:  ## Run the FastAPI scoring endpoint
 	uvicorn home_credit.serving.api:app --reload --port 8000
