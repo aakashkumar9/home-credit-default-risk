@@ -5,6 +5,7 @@ than surfacing as a confusing dbt error three layers downstream.
 
     python -m home_credit.ingest.load_raw_data
 """
+
 import logging
 import sys
 from pathlib import Path
@@ -42,7 +43,9 @@ def load_table(con: duckdb.DuckDBPyConnection, table: str, fname: str) -> int:
 
     n_rows = con.execute(f"select count(*) from raw.{table}").fetchone()[0]
     if n_rows == 0:
-        raise IngestionError(f"raw.{table} loaded 0 rows from {fname} - is the file empty or truncated?")
+        raise IngestionError(
+            f"raw.{table} loaded 0 rows from {fname} - is the file empty or truncated?"
+        )
 
     for col in required:
         n_null = con.execute(f"select count(*) from raw.{table} where {col} is null").fetchone()[0]

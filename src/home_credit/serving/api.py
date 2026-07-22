@@ -15,6 +15,7 @@ DuckDB for a single row rather than loading the whole mart into pandas,
 since that wouldn't scale to real data size (the mart is ~307k rows on the
 real dataset) if it happened on every request.
 """
+
 import json
 from contextlib import asynccontextmanager
 from typing import Any
@@ -89,9 +90,11 @@ def _jsonable(value: Any) -> Any:
 
 
 def _fetch_applicant_row(sk_id_curr: int) -> pd.DataFrame:
-    row = state["con"].execute(
-        f"select * from {config.MART_TABLE} where {config.ID_COL} = ?", [sk_id_curr]
-    ).df()
+    row = (
+        state["con"]
+        .execute(f"select * from {config.MART_TABLE} where {config.ID_COL} = ?", [sk_id_curr])
+        .df()
+    )
     if row.empty:
         raise HTTPException(status_code=404, detail=f"sk_id_curr {sk_id_curr} not found")
     return row
@@ -134,7 +137,9 @@ def explain(sk_id_curr: int):
 
     feature_cols, categorical_cols = meta["feature_cols"], meta["categorical_cols"]
     row = _fetch_applicant_row(sk_id_curr)
-    X = prepare_tree_dtypes(row, categorical_cols, categories=meta["categorical_categories"])[feature_cols]
+    X = prepare_tree_dtypes(row, categorical_cols, categories=meta["categorical_categories"])[
+        feature_cols
+    ]
 
     explanation = state["explainer"](X)
     shap_row = positive_class_values(explanation.values)[0]

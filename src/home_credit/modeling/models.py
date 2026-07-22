@@ -17,6 +17,7 @@ Both tree models carve out their own small internal validation split for
 early stopping, from their own training data only - never from the fold or
 holdout they'll be scored on, which would leak information into the score.
 """
+
 import lightgbm as lgb
 import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
@@ -30,7 +31,9 @@ from home_credit.features import build_linear_preprocessor
 class LogisticRegressionModel:
     name = "logistic_regression"
 
-    def __init__(self, numeric_cols: list[str], categorical_cols: list[str], seed: int = config.RANDOM_SEED):
+    def __init__(
+        self, numeric_cols: list[str], categorical_cols: list[str], seed: int = config.RANDOM_SEED
+    ):
         preprocessor = build_linear_preprocessor(numeric_cols, categorical_cols)
         clf = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=seed)
         self.pipeline = Pipeline([("preprocess", preprocessor), ("classify", clf)])
@@ -75,14 +78,19 @@ class LightGBMModel:
             X, y, test_size=config.INNER_VALID_SIZE, stratify=y, random_state=self.seed
         )
         scale_pos_weight = (y_fit == 0).sum() / (y_fit == 1).sum()
-        self.model = lgb.LGBMClassifier(**self.PARAMS, scale_pos_weight=scale_pos_weight, random_state=self.seed)
+        self.model = lgb.LGBMClassifier(
+            **self.PARAMS, scale_pos_weight=scale_pos_weight, random_state=self.seed
+        )
         self.model.fit(
             X_fit,
             y_fit,
             eval_set=[(X_val, y_val)],
             eval_metric="auc",
             categorical_feature=self.categorical_cols,
-            callbacks=[lgb.early_stopping(config.EARLY_STOPPING_ROUNDS, verbose=False), lgb.log_evaluation(0)],
+            callbacks=[
+                lgb.early_stopping(config.EARLY_STOPPING_ROUNDS, verbose=False),
+                lgb.log_evaluation(0),
+            ],
         )
         return self
 

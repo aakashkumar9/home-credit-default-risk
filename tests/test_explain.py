@@ -1,7 +1,12 @@
 import pytest
 
 from home_credit import config, data
-from home_credit.explain.shap_explainer import build_explainer, compute_global_importance, explain_applicant, main
+from home_credit.explain.shap_explainer import (
+    build_explainer,
+    compute_global_importance,
+    explain_applicant,
+    main,
+)
 from home_credit.modeling import train as train_mod
 
 
@@ -29,7 +34,9 @@ def trained_tree_champion(mart_db_path, tmp_path, monkeypatch):
 
 
 def test_global_importance_and_plot(trained_tree_champion):
-    mean_abs_shap, X_sample, shap_matrix = compute_global_importance(trained_tree_champion, sample_size=50)
+    mean_abs_shap, X_sample, shap_matrix = compute_global_importance(
+        trained_tree_champion, sample_size=50
+    )
 
     assert len(mean_abs_shap) == X_sample.shape[1]
     assert shap_matrix.shape == (len(X_sample), X_sample.shape[1])

@@ -6,6 +6,7 @@ on. A production build would carve out a third, fully untouched fold for
 this final number; here it's a portfolio-scoped simplification, noted
 because it matters for interpreting the metrics honestly.
 """
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -29,9 +30,14 @@ def evaluate_predictions(y_true, y_proba) -> dict:
     }
 
 
-def plot_calibration_curve(y_true, uncalibrated_proba, calibrated_proba, out_path, n_bins: int = 10):
+def plot_calibration_curve(
+    y_true, uncalibrated_proba, calibrated_proba, out_path, n_bins: int = 10
+):
     fig, ax = plt.subplots(figsize=(6, 6))
-    for label, proba in [("uncalibrated", uncalibrated_proba), ("calibrated (isotonic)", calibrated_proba)]:
+    for label, proba in [
+        ("uncalibrated", uncalibrated_proba),
+        ("calibrated (isotonic)", calibrated_proba),
+    ]:
         frac_pos, mean_pred = calibration_curve(y_true, proba, n_bins=n_bins, strategy="quantile")
         ax.plot(mean_pred, frac_pos, marker="o", label=label)
     ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="perfectly calibrated")

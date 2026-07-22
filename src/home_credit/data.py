@@ -1,6 +1,7 @@
 """Loads mart_applicant_features from DuckDB - the single feature table every
 downstream consumer (EDA, modeling, explainability) reads from.
 """
+
 import duckdb
 import pandas as pd
 

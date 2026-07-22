@@ -1,4 +1,4 @@
-.PHONY: setup ingest dbt-build dbt-docs eda train explain serve-api dashboard test lint fmt docker-build docker-run
+.PHONY: setup ingest dbt-build dbt-docs validate eda train explain serve-api dashboard test lint fmt docker-build docker-run
 
 setup:  ## Install the package + dev tools (editable install)
 	pip install -e ".[dev]"
@@ -6,11 +6,14 @@ setup:  ## Install the package + dev tools (editable install)
 ingest:  ## Load data/raw/*.csv into DuckDB's raw schema
 	python -m home_credit.ingest.load_raw_data
 
-dbt-build:  ## Load raw data, then run dbt build (staging -> intermediate -> marts) + tests
+dbt-build:  ## Load raw data, then run dbt build (staging -> intermediate -> marts) + tests + mart validation
 	./scripts/build_warehouse.sh
 
 dbt-docs:  ## Serve dbt docs locally
 	cd warehouse && DBT_PROFILES_DIR=. dbt docs serve
+
+validate:  ## Validate the built mart against its pandera schema (also runs at the start of `train`)
+	python -m home_credit.validation.validate_mart
 
 eda:  ## Regenerate docs/eda_summary.md from the built mart
 	python -m home_credit.eda
@@ -41,5 +44,8 @@ fmt:  ## Auto-format
 docker-build:  ## Build the serving image
 	docker build -t home-credit-default-risk .
 
-docker-run:  ## Run the serving image, mounting a pre-built model dir
-	docker run --rm -p 8000:8000 -v $(PWD)/models:/app/models home-credit-default-risk
+docker-run:  ## Run the serving image, mounting the pre-built model dir + DuckDB warehouse
+	docker run --rm -p 8000:8000 \
+		-v $(PWD)/models:/app/models \
+		-v $(PWD)/data:/app/data \
+		home-credit-default-risk

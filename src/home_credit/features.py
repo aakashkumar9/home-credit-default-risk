@@ -3,6 +3,7 @@ missingness and categoricals" is decided, so the baseline logistic
 regression, LightGBM, XGBoost, and the EDA report all agree on what a
 "feature" is and how it's typed.
 """
+
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -73,7 +74,9 @@ def extract_categories(df: pd.DataFrame, categorical_cols: list[str]) -> dict[st
     return {col: df[col].astype("category").cat.categories.tolist() for col in categorical_cols}
 
 
-def build_linear_preprocessor(numeric_cols: list[str], categorical_cols: list[str]) -> ColumnTransformer:
+def build_linear_preprocessor(
+    numeric_cols: list[str], categorical_cols: list[str]
+) -> ColumnTransformer:
     """For the baseline logistic regression, which - unlike the tree models -
     can't handle missing values or raw strings directly: median-impute +
     standardize numeric columns, most-frequent-impute + one-hot categoricals.
@@ -81,15 +84,21 @@ def build_linear_preprocessor(numeric_cols: list[str], categorical_cols: list[st
     application_test) doesn't crash scoring - it just contributes an
     all-zero one-hot row instead.
     """
-    numeric_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy="median")),
-        ("scale", StandardScaler()),
-    ])
-    categorical_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore")),
-    ])
-    return ColumnTransformer([
-        ("numeric", numeric_pipeline, numeric_cols),
-        ("categorical", categorical_pipeline, categorical_cols),
-    ])
+    numeric_pipeline = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="median")),
+            ("scale", StandardScaler()),
+        ]
+    )
+    categorical_pipeline = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    return ColumnTransformer(
+        [
+            ("numeric", numeric_pipeline, numeric_cols),
+            ("categorical", categorical_pipeline, categorical_cols),
+        ]
+    )

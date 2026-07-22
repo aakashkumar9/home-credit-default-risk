@@ -1,1 +1,1 @@
-"""Pandera schemas validating raw and mart-level data. Filled in in Phase 8."""
+"""Pandera schema for the mart_applicant_features contract. See schemas.py."""

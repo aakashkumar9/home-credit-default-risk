@@ -8,6 +8,7 @@ MLflow.
 
     python -m home_credit.modeling.train
 """
+
 import json
 
 import joblib
@@ -17,16 +18,24 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from home_credit import config, data
-from home_credit.features import extract_categories, get_feature_columns, prepare_tree_dtypes, split_column_types
+from home_credit.features import (
+    extract_categories,
+    get_feature_columns,
+    prepare_tree_dtypes,
+    split_column_types,
+)
 from home_credit.modeling import calibrate as calibrate_mod
 from home_credit.modeling import evaluate as evaluate_mod
 from home_credit.modeling.cv import cross_validate
 from home_credit.modeling.models import LightGBMModel, LogisticRegressionModel, XGBoostModel
+from home_credit.validation.schemas import validate_mart
 
 MODEL_NAMES = ["logistic_regression", "lightgbm", "xgboost"]
 
 
-def _model_factory(model_name: str, numeric_cols: list[str], categorical_cols: list[str], seed: int):
+def _model_factory(
+    model_name: str, numeric_cols: list[str], categorical_cols: list[str], seed: int
+):
     if model_name == "logistic_regression":
         return lambda: LogisticRegressionModel(numeric_cols, categorical_cols, seed)
     if model_name == "lightgbm":
@@ -44,6 +53,7 @@ def train(duckdb_path: str | None = None) -> dict:
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
 
     df = data.load_mart(duckdb_path)
+    validate_mart(df)  # fail fast on a broken/drifted mart before spending time training on it
     train_df, _ = data.split_train_score(df)
     feature_cols = get_feature_columns(df)
     numeric_cols, categorical_cols = split_column_types(df, feature_cols)
@@ -98,7 +108,10 @@ def train(duckdb_path: str | None = None) -> dict:
         # it never sees during training - both for calibration and the final
         # reported metrics.
         outer_fit_idx, holdout_idx = train_test_split(
-            np.arange(len(train_df)), test_size=config.CALIBRATION_HOLDOUT_SIZE, stratify=y, random_state=config.RANDOM_SEED
+            np.arange(len(train_df)),
+            test_size=config.CALIBRATION_HOLDOUT_SIZE,
+            stratify=y,
+            random_state=config.RANDOM_SEED,
         )
         champion_df = model_frame(champion_name)
         X_fit = champion_df.iloc[outer_fit_idx][feature_cols]
@@ -106,7 +119,9 @@ def train(duckdb_path: str | None = None) -> dict:
         X_holdout = champion_df.iloc[holdout_idx][feature_cols]
         y_holdout = y.iloc[holdout_idx]
 
-        champion_factory = _model_factory(champion_name, numeric_cols, categorical_cols, config.RANDOM_SEED)
+        champion_factory = _model_factory(
+            champion_name, numeric_cols, categorical_cols, config.RANDOM_SEED
+        )
         champion_model = champion_factory().fit(X_fit, y_fit)
 
         uncalibrated_proba = champion_model.predict_proba(X_holdout)
@@ -117,7 +132,9 @@ def train(duckdb_path: str | None = None) -> dict:
         calibrated_metrics = evaluate_mod.evaluate_predictions(y_holdout, calibrated_proba)
 
         calibration_plot_path = config.REPORTS_DIR / "calibration_curve.png"
-        evaluate_mod.plot_calibration_curve(y_holdout, uncalibrated_proba, calibrated_proba, calibration_plot_path)
+        evaluate_mod.plot_calibration_curve(
+            y_holdout, uncalibrated_proba, calibrated_proba, calibration_plot_path
+        )
 
         for k, v in uncalibrated_metrics.items():
             mlflow.log_metric(f"holdout_uncalibrated_{k}", v)

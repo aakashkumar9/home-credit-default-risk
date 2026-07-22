@@ -15,12 +15,14 @@ from home_credit.modeling.models import LightGBMModel, LogisticRegressionModel, 
 def synthetic_features():
     rng = np.random.default_rng(0)
     n = 200
-    X = pd.DataFrame({
-        "num_a": rng.normal(size=n),
-        "num_b": rng.normal(size=n),
-        "flag": rng.integers(0, 2, size=n).astype(bool),  # numeric per split_column_types
-        "cat_a": rng.choice(["X", "Y", "Z"], size=n),
-    })
+    X = pd.DataFrame(
+        {
+            "num_a": rng.normal(size=n),
+            "num_b": rng.normal(size=n),
+            "flag": rng.integers(0, 2, size=n).astype(bool),  # numeric per split_column_types
+            "cat_a": rng.choice(["X", "Y", "Z"], size=n),
+        }
+    )
     y = pd.Series(rng.integers(0, 2, size=n), name="target")
     return X, y
 
@@ -28,7 +30,9 @@ def synthetic_features():
 def test_cross_validate_returns_one_score_per_fold(synthetic_features):
     X, y = synthetic_features
     numeric_cols, categorical_cols = ["num_a", "num_b", "flag"], ["cat_a"]
-    factory = lambda: LogisticRegressionModel(numeric_cols, categorical_cols, seed=0)
+
+    def factory():
+        return LogisticRegressionModel(numeric_cols, categorical_cols, seed=0)
 
     result = cross_validate("logistic_regression", factory, X, y, n_splits=4, seed=0)
 

@@ -11,12 +11,14 @@ def test_missingness_table_reports_correct_rates():
 
 
 def test_numeric_target_correlation_ranks_by_absolute_value():
-    df = pd.DataFrame({
-        "target": [0, 0, 1, 1, 0, 1, 0, 1],
-        "strong_pos": [1, 2, 8, 9, 1, 9, 2, 8],
-        "strong_neg": [9, 8, 2, 1, 9, 1, 8, 2],
-        "weak": [5, 3, 6, 2, 7, 4, 5, 3],
-    })
+    df = pd.DataFrame(
+        {
+            "target": [0, 0, 1, 1, 0, 1, 0, 1],
+            "strong_pos": [1, 2, 8, 9, 1, 9, 2, 8],
+            "strong_neg": [9, 8, 2, 1, 9, 1, 8, 2],
+            "weak": [5, 3, 6, 2, 7, 4, 5, 3],
+        }
+    )
     result = eda.numeric_target_correlation(df, ["strong_pos", "strong_neg", "weak"])
     assert list(result.index[:2]) == ["strong_pos", "strong_neg"] or list(result.index[:2]) == [
         "strong_neg",
@@ -27,11 +29,13 @@ def test_numeric_target_correlation_ranks_by_absolute_value():
 
 
 def test_categorical_target_spread_respects_min_count():
-    df = pd.DataFrame({
-        "target": [0] * 25 + [1] * 25,
-        "wide_spread": ["A"] * 25 + ["B"] * 25,  # A always 0, B always 1 -> spread 1.0
-        "rare_category": ["X"] * 49 + ["Y"] * 1,  # Y has only 1 row, below min_count
-    })
+    df = pd.DataFrame(
+        {
+            "target": [0] * 25 + [1] * 25,
+            "wide_spread": ["A"] * 25 + ["B"] * 25,  # A always 0, B always 1 -> spread 1.0
+            "rare_category": ["X"] * 49 + ["Y"] * 1,  # Y has only 1 row, below min_count
+        }
+    )
     result = eda.categorical_target_spread(df, ["wide_spread", "rare_category"], min_count=20)
     assert "wide_spread" in result["column"].values
     row = result[result["column"] == "wide_spread"].iloc[0]
