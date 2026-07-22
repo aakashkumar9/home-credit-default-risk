@@ -41,7 +41,7 @@ flowchart TD
 | 1 | Project scaffold (`src/` layout, `pyproject.toml`, Makefile, README) | done |
 | 2 | Data ingestion into DuckDB (`home_credit.ingest`) | done |
 | 3 | dbt transformation layer (staging -> intermediate -> marts) | **done** (built pre-scaffold, see below) |
-| 4 | Feature engineering + EDA summary | pending |
+| 4 | Feature engineering + EDA summary | done |
 | 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | pending (an earlier single-split LightGBM version exists in the legacy `modeling/` package, superseded in this phase) |
 | 6 | Explainability (global + per-applicant SHAP) | pending (legacy global-only version exists in `modeling/explain.py`) |
 | 7 | Serving: FastAPI `/predict` + Streamlit dashboard | pending |
@@ -60,14 +60,18 @@ described above.
 ```
 src/home_credit/       Installable package (pip install -e .)
   config.py             Central paths/constants - everything else imports from here
+  data.py                done: loads mart_applicant_features - the shared read path
+  features.py            done: feature-column selection, dtype prep, linear-model preprocessing
+  eda.py                 done: generates docs/eda_summary.md
   ingest/                done: raw CSV -> DuckDB, with schema/row-count/uniqueness checks
   validation/            Phase 8: pandera schemas
-  modeling/              Phase 5: feature prep, CV training, calibration, MLflow logging
+  modeling/              Phase 5: CV training, calibration, MLflow logging
   explain/               Phase 6: SHAP
   serving/               Phase 7: FastAPI app
 dashboard/               Phase 7: Streamlit app
 warehouse/               dbt project: staging -> intermediate -> marts (done)
 scripts/                 build_warehouse.sh (ingest -> dbt build -> dbt docs generate)
+docs/                    eda_summary.md (committed EDA report - see caveat below)
 tests/                   pytest suite + synthetic fixture generator
 modeling/                Legacy pre-scaffold modelling code, superseded in phase 5
 data/raw/                Kaggle CSVs go here (gitignored)
@@ -165,6 +169,35 @@ enforcing every history table's foreign key actually exists in its parent
 `accepted_values` test on `target`, and a singular test
 (`warehouse/tests/assert_train_test_target_consistency.sql`) asserting
 training rows always have a label and scoring rows never do.
+
+## Feature engineering & EDA (done)
+
+**`src/home_credit/features.py`** is the single place that decides how a
+"feature" is typed, shared by the EDA report and every model in phase 5:
+
+- Numeric vs. categorical is inferred from pandas dtype (`split_column_types`).
+- For the tree models (LightGBM, XGBoost): categoricals become pandas
+  `category` dtype, and missing values are left alone - both models split
+  on missingness natively, so imputing here would destroy real signal (a
+  `NULL` in `cc_utilization_avg`, for instance, means "no credit card
+  history," not "unknown utilization").
+- For the baseline logistic regression, which can't handle missing values
+  or raw strings: `build_linear_preprocessor` median-imputes + standardizes
+  numeric columns, most-frequent-imputes + one-hot-encodes categoricals
+  (`handle_unknown='ignore'`, so a category unseen in training doesn't
+  crash scoring).
+
+**`src/home_credit/eda.py`** (`make eda`) generates `docs/eda_summary.md`:
+missingness by column, the numeric features most correlated with `TARGET`,
+and the categorical features with the widest target-rate spread (restricted
+to categories with at least 20 applicants, so one outlier doesn't dominate).
+
+> **Caveat on the committed report:** `docs/eda_summary.md` in this repo was
+> generated against the synthetic fixtures, not the real Kaggle data - the
+> numbers in it are noise (max correlation ~0.18 on 400 synthetic rows),
+> not real default drivers. It's committed to document the report's shape;
+> re-run `make eda` after building the warehouse against the real dataset
+> to get a meaningful one.
 
 ## Setup
 
