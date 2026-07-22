@@ -43,7 +43,7 @@ flowchart TD
 | 3 | dbt transformation layer (staging -> intermediate -> marts) | **done** (built pre-scaffold, see below) |
 | 4 | Feature engineering + EDA summary | done |
 | 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | done |
-| 6 | Explainability (global + per-applicant SHAP) | pending |
+| 6 | Explainability (global + per-applicant SHAP) | done |
 | 7 | Serving: FastAPI `/predict` + Streamlit dashboard | pending |
 | 8 | Docker, CI, data validation, monitoring/retraining notes | pending (basic CI exists, see below) |
 
@@ -63,8 +63,8 @@ src/home_credit/       Installable package (pip install -e .)
   eda.py                 generates docs/eda_summary.md
   ingest/                raw CSV -> DuckDB, with schema/row-count/uniqueness checks
   modeling/              CV model comparison, champion selection, calibration, MLflow logging
+  explain/               global + per-applicant SHAP (tree champions)
   validation/            Phase 8: pandera schemas
-  explain/               Phase 6: SHAP
   serving/               Phase 7: FastAPI app
 dashboard/               Phase 7: Streamlit app
 warehouse/               dbt project: staging -> intermediate -> marts (done)
@@ -246,6 +246,40 @@ it's the only data the champion never trained on. A production build would
 carve out a third, fully untouched fold for that final number - left out
 here as a portfolio-scoped simplification of a fairly standard technique.
 
+## Explainability (done)
+
+`src/home_credit/explain/shap_explainer.py` (`make explain`) - global and
+per-applicant SHAP, both against the champion's raw underlying estimator
+(`champion_model.joblib`), not the calibrated wrapper: explaining an
+isotonic regression stacked on top of a tree model would attribute credit
+on the wrong scale (post-calibration probability rather than the tree's
+own margin) - the trees make the risk decision, calibration only rescales
+it, so the trees are the correct explanation target.
+
+- **Global** (`compute_global_importance` / `main`): `shap.TreeExplainer`
+  over a sample of the training set, writing `reports/shap_summary.png`
+  (a beeswarm plot) and `reports/shap_feature_importance.csv` (mean
+  absolute SHAP value per feature, ranked).
+- **Per-applicant** (`explain_applicant(sk_id_curr)`): base value + every
+  feature's signed contribution for one applicant, sorted by
+  `|contribution|` - `base_value + sum(contributions) == predicted_score`
+  by construction. This is what phase 7's API/dashboard will surface as
+  "why did this applicant get this score."
+
+**Scoped to the tree champions (LightGBM/XGBoost) only.** A model-agnostic
+fallback for the logistic-regression baseline was tried and dropped: SHAP's
+default masker computes `numpy.isclose` differences directly against the
+raw background sample, which crashes on this dataset's string-typed
+categorical columns before ever reaching the pipeline's own preprocessing
+- confirmed by actually running it, not by inspection. Making that path
+work correctly (explaining the pipeline in its post-one-hot-encoded space,
+then mapping values on expanded dummy columns back to the original
+business features) is real, non-trivial work that's out of scope here;
+`build_explainer` raises a clear `NotImplementedError` rather than
+silently running a fallback that's actually broken. Given this dataset's
+heavy missingness and many categoricals, a tree model reliably outperforms
+the linear baseline in practice anyway.
+
 ## Setup
 
 ```bash
@@ -255,11 +289,12 @@ make setup        # pip install -e ".[dev]" - installs the src/home_credit packa
 # 1. place the Kaggle CSVs in data/raw/ (see "Expected raw data" above)
 make dbt-build     # load raw CSVs -> dbt build (staging -> intermediate -> marts) -> dbt docs generate
 make train         # cross-validate LR/LightGBM/XGBoost -> champion -> calibrate -> evaluate -> log to MLflow
+make explain       # SHAP: reports/shap_summary.png + shap_feature_importance.csv
 ```
 
 Run `make` with no target (or open the `Makefile`) for the full command
 list - `serve-api`, `dashboard`, `lint` etc. land as their phases are
-built; `setup`, `dbt-build`, `eda`, `train`, and `test` are live.
+built; `setup`, `dbt-build`, `eda`, `train`, `explain`, and `test` are live.
 
 ### Trying it without the real dataset
 
@@ -273,11 +308,12 @@ python tests/generate_synthetic_data.py         # writes tests/fixtures/raw/
 DATA_RAW_DIR=tests/fixtures/raw DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.ingest.load_raw_data
 DBT_PROFILES_DIR=warehouse DUCKDB_PATH=/tmp/dev.duckdb dbt build --project-dir warehouse
 DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.modeling.run_pipeline
+DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.explain.shap_explainer
 ```
 
 This is exactly what CI (`.github/workflows/ci.yml`) does today, plus
 running the full `pytest` suite against the resulting warehouse; phase 8
-will extend it with lint once phases 6-7 land.
+will extend it with lint once phase 7 lands.
 
 ## Results
 
