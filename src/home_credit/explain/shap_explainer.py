@@ -40,7 +40,11 @@ from home_credit.features import prepare_tree_dtypes
 TREE_MODEL_NAMES = {"lightgbm", "xgboost"}
 
 
-def _load_champion():
+def load_champion():
+    """Loads the champion's raw estimator + feature metadata from disk.
+    Shared with home_credit.serving, which loads this once at startup
+    rather than per-request - see that module for why.
+    """
     with open(config.MODEL_DIR / "feature_metadata.json") as f:
         meta = json.load(f)
     champion = joblib.load(config.MODEL_DIR / "champion_model.joblib")
@@ -56,7 +60,7 @@ def build_explainer(champion_model_type: str, champion):
     return shap.TreeExplainer(champion)
 
 
-def _positive_class_values(shap_values: np.ndarray) -> np.ndarray:
+def positive_class_values(shap_values: np.ndarray) -> np.ndarray:
     """SHAP's array shape for binary classifiers varies by explainer/version:
     (n_samples, n_features) already for the positive class, or
     (n_samples, n_features, n_classes) with both classes - normalize to the
@@ -68,7 +72,7 @@ def _positive_class_values(shap_values: np.ndarray) -> np.ndarray:
     return values
 
 
-def _positive_class_base_value(base_values) -> np.ndarray:
+def positive_class_base_value(base_values) -> np.ndarray:
     base = np.asarray(base_values)
     if base.ndim == 2:
         return base[:, 1]
@@ -81,11 +85,11 @@ def compute_shap(champion_type: str, champion, X: pd.DataFrame):
     """
     explainer = build_explainer(champion_type, champion)
     explanation = explainer(X)
-    return _positive_class_values(explanation.values), _positive_class_base_value(explanation.base_values)
+    return positive_class_values(explanation.values), positive_class_base_value(explanation.base_values)
 
 
 def compute_global_importance(duckdb_path: str | None = None, sample_size: int = 2000):
-    champion, meta = _load_champion()
+    champion, meta = load_champion()
     feature_cols, categorical_cols, champion_type = (
         meta["feature_cols"],
         meta["categorical_cols"],
@@ -95,7 +99,7 @@ def compute_global_importance(duckdb_path: str | None = None, sample_size: int =
     df = data.load_mart(duckdb_path)
     train_df, _ = data.split_train_score(df)
     if champion_type in TREE_MODEL_NAMES:
-        train_df = prepare_tree_dtypes(train_df, categorical_cols)
+        train_df = prepare_tree_dtypes(train_df, categorical_cols, categories=meta["categorical_categories"])
 
     sample = train_df.sample(n=min(sample_size, len(train_df)), random_state=config.RANDOM_SEED)
     X_sample = sample[feature_cols]
@@ -113,12 +117,29 @@ def plot_global_summary(X_sample: pd.DataFrame, shap_matrix: np.ndarray, out_pat
     plt.close()
 
 
+def contributions_for_row(feature_cols: list[str], row_values, shap_row: np.ndarray) -> list[dict]:
+    """Builds the feature/value/shap_value records for one applicant,
+    sorted by |shap_value| descending. Shared between explain_applicant
+    (below, whole-mart batch/CLI path) and home_credit.serving (single-row
+    API path) so the two never format this differently.
+    """
+    contributions = (
+        pd.DataFrame({"feature": feature_cols, "value": row_values, "shap_value": shap_row})
+        .assign(abs_shap=lambda d: d["shap_value"].abs())
+        .sort_values("abs_shap", ascending=False)
+        .drop(columns="abs_shap")
+    )
+    return contributions.to_dict(orient="records")
+
+
 def explain_applicant(sk_id_curr: int, duckdb_path: str | None = None) -> dict:
     """Per-applicant SHAP breakdown: base value + each feature's
     contribution to that applicant's predicted (uncalibrated) score, sorted
-    by |contribution|. Used by serving/dashboard in phase 7.
+    by |contribution|. Loads the whole mart - fine for CLI/batch use; the
+    API (phase 7) does a single-row DuckDB lookup instead, since loading
+    the full mart per HTTP request wouldn't scale to real data size.
     """
-    champion, meta = _load_champion()
+    champion, meta = load_champion()
     feature_cols, categorical_cols, champion_type = (
         meta["feature_cols"],
         meta["categorical_cols"],
@@ -127,7 +148,7 @@ def explain_applicant(sk_id_curr: int, duckdb_path: str | None = None) -> dict:
 
     df = data.load_mart(duckdb_path)
     if champion_type in TREE_MODEL_NAMES:
-        df = prepare_tree_dtypes(df, categorical_cols)
+        df = prepare_tree_dtypes(df, categorical_cols, categories=meta["categorical_categories"])
 
     row = df[df[config.ID_COL] == sk_id_curr]
     if row.empty:
@@ -137,22 +158,11 @@ def explain_applicant(sk_id_curr: int, duckdb_path: str | None = None) -> dict:
     shap_row = shap_matrix[0]
     base_value = float(base_values[0]) if base_values.ndim else float(base_values)
 
-    contributions = (
-        pd.DataFrame({
-            "feature": feature_cols,
-            "value": row[feature_cols].iloc[0].to_numpy(),
-            "shap_value": shap_row,
-        })
-        .assign(abs_shap=lambda d: d["shap_value"].abs())
-        .sort_values("abs_shap", ascending=False)
-        .drop(columns="abs_shap")
-    )
-
     return {
         "sk_id_curr": int(sk_id_curr),
         "base_value": base_value,
         "predicted_score": base_value + float(shap_row.sum()),
-        "contributions": contributions.to_dict(orient="records"),
+        "contributions": contributions_for_row(feature_cols, row[feature_cols].iloc[0].to_numpy(), shap_row),
     }
 
 

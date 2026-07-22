@@ -44,7 +44,7 @@ flowchart TD
 | 4 | Feature engineering + EDA summary | done |
 | 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | done |
 | 6 | Explainability (global + per-applicant SHAP) | done |
-| 7 | Serving: FastAPI `/predict` + Streamlit dashboard | pending |
+| 7 | Serving: FastAPI `/predict` + Streamlit dashboard | done |
 | 8 | Docker, CI, data validation, monitoring/retraining notes | pending (basic CI exists, see below) |
 
 The dbt project (`warehouse/`) was built and validated first and already
@@ -65,8 +65,8 @@ src/home_credit/       Installable package (pip install -e .)
   modeling/              CV model comparison, champion selection, calibration, MLflow logging
   explain/               global + per-applicant SHAP (tree champions)
   validation/            Phase 8: pandera schemas
-  serving/               Phase 7: FastAPI app
-dashboard/               Phase 7: Streamlit app
+  serving/               FastAPI scoring app (api.py)
+dashboard/               Streamlit dashboard (app.py)
 warehouse/               dbt project: staging -> intermediate -> marts (done)
 scripts/                 build_warehouse.sh (ingest -> dbt build -> dbt docs generate)
 docs/                    eda_summary.md (committed EDA report - see caveat below)
@@ -280,6 +280,54 @@ silently running a fallback that's actually broken. Given this dataset's
 heavy missingness and many categoricals, a tree model reliably outperforms
 the linear baseline in practice anyway.
 
+## Serving (done)
+
+**`src/home_credit/serving/api.py`** (`make serve-api`) - a FastAPI app
+scoring applicants already present in the mart, by `sk_id_curr`, not raw
+application fields:
+
+```
+GET /health
+GET /predict/{sk_id_curr}   -> calibrated default probability
+GET /explain/{sk_id_curr}   -> base value + per-feature SHAP contributions
+```
+
+Scoring by ID against the mart rather than accepting raw applicant fields
+in the request body is a deliberate choice: the mart *is* the feature
+store (~130 engineered features aggregated from six history tables), and
+an internal risk API in a real deployment would sit on top of a
+precomputed feature store rather than recomputing all of that per request.
+Model, feature metadata, and the SHAP explainer are all loaded once at
+FastAPI startup (`lifespan`), and each endpoint does a single-row DuckDB
+lookup rather than loading the whole mart into pandas - loading ~307k rows
+per request wouldn't scale on the real dataset. `/explain` returns `501`
+for a non-tree champion, mirroring the explainability module's own scope.
+
+**`dashboard/app.py`** (`make dashboard`) - a Streamlit app for browsing
+applicants (either the training or scoring pool) by `sk_id_curr`, showing
+the calibrated probability, a risk tier (illustrative cut points, not a
+real cost/benefit analysis), and - for tree champions - the SHAP drivers
+behind the score as a diverging red/blue bar chart (increases vs. decreases
+risk), plus the global SHAP summary image from `make explain`. It reuses
+the same public primitives from `home_credit.explain.shap_explainer` as
+the API (`load_champion`, `build_explainer`, `contributions_for_row`, ...)
+so the two serving surfaces never disagree on how a contribution is
+computed or formatted.
+
+**Category-dtype consistency (train vs. serving).** Both the API and the
+dashboard score one applicant row at a time. Casting a single row to
+pandas `category` dtype independently derives that column's categories
+from only what's present in *that row* - zero categories if the value
+happens to be null, which crashed XGBoost's native categorical handling.
+Fixed by capturing each categorical column's full category universe once
+at training time (`extract_categories`, persisted into
+`feature_metadata.json`) and passing it into every inference-time call to
+`prepare_tree_dtypes` (`predict.py`, `shap_explainer.py`, `api.py`,
+`dashboard/app.py`) - not just to avoid the crash, but because inconsistent
+category encoding between train and inference is a silent correctness bug
+even when it doesn't crash. Covered by regression tests in
+`tests/test_features.py`.
+
 ## Setup
 
 ```bash
@@ -290,11 +338,13 @@ make setup        # pip install -e ".[dev]" - installs the src/home_credit packa
 make dbt-build     # load raw CSVs -> dbt build (staging -> intermediate -> marts) -> dbt docs generate
 make train         # cross-validate LR/LightGBM/XGBoost -> champion -> calibrate -> evaluate -> log to MLflow
 make explain       # SHAP: reports/shap_summary.png + shap_feature_importance.csv
+make serve-api     # FastAPI on :8000 - GET /predict/{sk_id_curr}, /explain/{sk_id_curr}
+make dashboard     # Streamlit dashboard on :8501
 ```
 
 Run `make` with no target (or open the `Makefile`) for the full command
-list - `serve-api`, `dashboard`, `lint` etc. land as their phases are
-built; `setup`, `dbt-build`, `eda`, `train`, `explain`, and `test` are live.
+list - `lint` lands with phase 8; `setup`, `dbt-build`, `eda`, `train`,
+`explain`, `serve-api`, `dashboard`, and `test` are live.
 
 ### Trying it without the real dataset
 

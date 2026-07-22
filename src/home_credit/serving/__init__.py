@@ -1,1 +1,1 @@
-"""FastAPI scoring app. Filled in in Phase 7."""
+"""FastAPI scoring app. See api.py."""
