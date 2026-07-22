@@ -26,8 +26,9 @@ def test_get_feature_columns_excludes_id_target_is_train(sample_df):
 def test_split_column_types_buckets_correctly(sample_df):
     feature_cols = features.get_feature_columns(sample_df)
     numeric_cols, categorical_cols = features.split_column_types(sample_df, feature_cols)
-    assert set(numeric_cols) == {"amt_income", "age_years"}
-    assert set(categorical_cols) == {"gender", "has_bureau_history"}
+    # booleans count as numeric (0/1) - see split_column_types' docstring for why
+    assert set(numeric_cols) == {"amt_income", "age_years", "has_bureau_history"}
+    assert set(categorical_cols) == {"gender"}
 
 
 def test_prepare_tree_dtypes_casts_categoricals_only(sample_df):
@@ -35,7 +36,7 @@ def test_prepare_tree_dtypes_casts_categoricals_only(sample_df):
     _, categorical_cols = features.split_column_types(sample_df, feature_cols)
     out = features.prepare_tree_dtypes(sample_df, categorical_cols)
     assert str(out["gender"].dtype) == "category"
-    assert str(out["has_bureau_history"].dtype) == "category"
+    assert out["has_bureau_history"].dtype != "category"
     assert out["amt_income"].dtype != "category"
 
 

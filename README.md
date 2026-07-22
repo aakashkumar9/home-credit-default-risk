@@ -42,30 +42,28 @@ flowchart TD
 | 2 | Data ingestion into DuckDB (`home_credit.ingest`) | done |
 | 3 | dbt transformation layer (staging -> intermediate -> marts) | **done** (built pre-scaffold, see below) |
 | 4 | Feature engineering + EDA summary | done |
-| 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | pending (an earlier single-split LightGBM version exists in the legacy `modeling/` package, superseded in this phase) |
-| 6 | Explainability (global + per-applicant SHAP) | pending (legacy global-only version exists in `modeling/explain.py`) |
+| 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | done |
+| 6 | Explainability (global + per-applicant SHAP) | pending |
 | 7 | Serving: FastAPI `/predict` + Streamlit dashboard | pending |
 | 8 | Docker, CI, data validation, monitoring/retraining notes | pending (basic CI exists, see below) |
 
 The dbt project (`warehouse/`) was built and validated first and already
 meets phase 3's bar as specified, so it isn't being redone - phases 2, 4-8
-build around it. The top-level `modeling/` package is an earlier iteration
-(single train/valid split, LightGBM only, no MLflow) kept in place until
-phase 5 replaces it with `src/home_credit/modeling` (cross-validated,
-both LightGBM and XGBoost, MLflow-tracked); it isn't the target architecture
-described above.
+build around it. The original pre-scaffold `modeling/` package (single
+train/valid split, LightGBM only, no MLflow) was replaced, not migrated,
+by `src/home_credit/modeling` in phase 5 and has been removed.
 
 ## Repository layout
 
 ```
 src/home_credit/       Installable package (pip install -e .)
   config.py             Central paths/constants - everything else imports from here
-  data.py                done: loads mart_applicant_features - the shared read path
-  features.py            done: feature-column selection, dtype prep, linear-model preprocessing
-  eda.py                 done: generates docs/eda_summary.md
-  ingest/                done: raw CSV -> DuckDB, with schema/row-count/uniqueness checks
+  data.py                loads mart_applicant_features - the shared read path
+  features.py            feature-column selection, dtype prep, linear-model preprocessing
+  eda.py                 generates docs/eda_summary.md
+  ingest/                raw CSV -> DuckDB, with schema/row-count/uniqueness checks
+  modeling/              CV model comparison, champion selection, calibration, MLflow logging
   validation/            Phase 8: pandera schemas
-  modeling/              Phase 5: CV training, calibration, MLflow logging
   explain/               Phase 6: SHAP
   serving/               Phase 7: FastAPI app
 dashboard/               Phase 7: Streamlit app
@@ -73,7 +71,6 @@ warehouse/               dbt project: staging -> intermediate -> marts (done)
 scripts/                 build_warehouse.sh (ingest -> dbt build -> dbt docs generate)
 docs/                    eda_summary.md (committed EDA report - see caveat below)
 tests/                   pytest suite + synthetic fixture generator
-modeling/                Legacy pre-scaffold modelling code, superseded in phase 5
 data/raw/                Kaggle CSVs go here (gitignored)
 ```
 
@@ -173,7 +170,8 @@ training rows always have a label and scoring rows never do.
 ## Feature engineering & EDA (done)
 
 **`src/home_credit/features.py`** is the single place that decides how a
-"feature" is typed, shared by the EDA report and every model in phase 5:
+"feature" is typed, shared by the EDA report and every model in
+`src/home_credit/modeling`:
 
 - Numeric vs. categorical is inferred from pandas dtype (`split_column_types`).
 - For the tree models (LightGBM, XGBoost): categoricals become pandas
@@ -199,6 +197,55 @@ to categories with at least 20 applicants, so one outlier doesn't dominate).
 > re-run `make eda` after building the warehouse against the real dataset
 > to get a meaningful one.
 
+## Modelling (done)
+
+`src/home_credit/modeling` (`make train`, or `python -m home_credit.modeling.run_pipeline`):
+
+1. **Cross-validated model comparison** (`cv.py`, `models.py`) - stratified
+   5-fold CV (`StratifiedKFold`, preserving the ~8% positive rate in every
+   fold) for three model types behind one shared `fit`/`predict_proba`
+   interface: a baseline logistic regression, LightGBM, and XGBoost.
+   - **Imbalance handling**: `scale_pos_weight` (negative/positive count)
+     for the tree models, `class_weight='balanced'` for the baseline -
+     reweighting the existing gradient/loss per class rather than
+     resampling (SMOTE, random oversampling). Interpolating synthetic rows
+     in a feature space built from subtle, correlated financial ratios is
+     more likely to produce unrealistic applicants than reweighting is to
+     mis-calibrate - and reweighting composes cleanly with the calibration
+     step that follows, which corrects exactly the probability skew it
+     introduces.
+   - Both tree models carve out their own small validation split from
+     *their own* training data for early stopping - never from the CV fold
+     or holdout they're scored on, which would leak information into the
+     score.
+   - The champion is picked by mean CV **PR-AUC**, not ROC-AUC - at an ~8%
+     positive rate, PR-AUC is what actually separates a useful model from
+     a useless one; ROC-AUC is logged too but can look deceptively good on
+     imbalanced data.
+2. **Calibration** (`calibrate.py`) - the champion is refit on a training
+   split and calibrated with isotonic regression
+   (`CalibratedClassifierCV` + `FrozenEstimator`) on a holdout it never
+   saw, correcting the probability skew `scale_pos_weight`/`class_weight`
+   introduce without touching ranking.
+3. **Evaluation** (`evaluate.py`) - ROC-AUC, PR-AUC, KS statistic, and
+   Brier score on that same holdout, before and after calibration, plus a
+   calibration curve plot (`reports/calibration_curve.png`).
+4. **MLflow** (`train.py`) - one parent run per training call
+   (`model_comparison`), one nested child run per model type with every
+   fold's ROC-AUC/PR-AUC plus the mean/std, the champion's holdout metrics
+   (both un/calibrated), and the calibration curve as a logged artifact.
+   Tracking store is local SQLite (`mlflow.db` - MLflow >=3 deprecated the
+   plain filesystem backend); view it with `mlflow ui --backend-store-uri
+   sqlite:///mlflow.db`.
+5. **`predict.py`** scores `application_test` with the calibrated champion
+   and writes a Kaggle-format `reports/submission.csv`.
+
+A production-scoped caveat, noted here rather than hidden: the same
+holdout is used to fit the calibrator *and* report final metrics, since
+it's the only data the champion never trained on. A production build would
+carve out a third, fully untouched fold for that final number - left out
+here as a portfolio-scoped simplification of a fairly standard technique.
+
 ## Setup
 
 ```bash
@@ -207,11 +254,12 @@ make setup        # pip install -e ".[dev]" - installs the src/home_credit packa
 
 # 1. place the Kaggle CSVs in data/raw/ (see "Expected raw data" above)
 make dbt-build     # load raw CSVs -> dbt build (staging -> intermediate -> marts) -> dbt docs generate
+make train         # cross-validate LR/LightGBM/XGBoost -> champion -> calibrate -> evaluate -> log to MLflow
 ```
 
 Run `make` with no target (or open the `Makefile`) for the full command
-list - `train`, `serve-api`, `dashboard`, `test`, `lint` etc. land as their
-phases are built; right now `setup` and `dbt-build` are live.
+list - `serve-api`, `dashboard`, `lint` etc. land as their phases are
+built; `setup`, `dbt-build`, `eda`, `train`, and `test` are live.
 
 ### Trying it without the real dataset
 
@@ -224,16 +272,27 @@ exercised without the (non-redistributable) Kaggle download:
 python tests/generate_synthetic_data.py         # writes tests/fixtures/raw/
 DATA_RAW_DIR=tests/fixtures/raw DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.ingest.load_raw_data
 DBT_PROFILES_DIR=warehouse DUCKDB_PATH=/tmp/dev.duckdb dbt build --project-dir warehouse
+DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.modeling.run_pipeline
 ```
 
 This is exactly what CI (`.github/workflows/ci.yml`) does today, plus
 running the full `pytest` suite against the resulting warehouse; phase 8
-will extend it with lint once phases 4-7 land.
+will extend it with lint once phases 6-7 land.
 
 ## Results
 
-_Filled in during phase 5 (baseline vs. LightGBM/XGBoost CV results,
-calibration curves) - not implemented yet._
+Run against the synthetic fixtures (400 training rows, no real signal -
+this is a pipeline-correctness check, not a meaningful benchmark): all
+three models cross-validate, XGBoost was selected as champion by mean CV
+PR-AUC, and calibration reduced the holdout Brier score from ~0.20 to
+~0.06 (calibration corrects probability skew - it doesn't and shouldn't
+improve ranking metrics on data with no real signal to rank).
+
+**Re-run `make train` against the real dataset for numbers worth
+reporting** - `reports/train_summary.json` (CV fold-by-fold and aggregate
+ROC-AUC/PR-AUC per model, champion, holdout metrics before/after
+calibration) and `reports/calibration_curve.png` are regenerated each run
+and gitignored, same treatment as the EDA report above.
 
 ## Design decisions
 
@@ -256,8 +315,26 @@ calibration curves) - not implemented yet._
 - **No feature store / Airflow.** The project is scoped to one batch
   build; orchestration beyond `scripts/build_warehouse.sh` would be
   solving a problem this dataset doesn't have.
+- **`scale_pos_weight`/`class_weight='balanced'`, not SMOTE.** See the
+  Modelling section above - reweighting composes cleanly with the
+  calibration step that follows; resampling would need its own
+  calibration correction on top, for a technique more likely to produce
+  unrealistic synthetic applicants in this feature space than to help.
+- **Champion selection by PR-AUC, not ROC-AUC.** At an ~8% positive rate,
+  ROC-AUC can look deceptively good (it's dominated by the easy majority
+  class); PR-AUC is what actually reflects performance on the minority
+  class this problem cares about.
+- **Booleans treated as numeric (0/1), not categorical**, in
+  `features.split_column_types`. They scale/split identically to any
+  other numeric feature for every model here, and treating them as
+  categorical caused two real bugs during development: XGBoost's native
+  categorical handling requires string-typed categories and crashes on
+  boolean ones, and combining multiple pandas `category`-dtype columns of
+  different underlying value types (bool alongside string) in one
+  `SimpleImputer` call hits a real pandas/sklearn dtype-promotion bug.
+  Both were caught by actually running the pipeline against real data,
+  not by reasoning about it - see the module docstrings in
+  `features.py`/`train.py` for the full detail.
 
-More decisions (imbalance handling, calibration method, LightGBM vs.
-XGBoost, monitoring/retraining approach) will be documented here as their
-phases land - see the legacy `modeling/` package's docstrings for the
-reasoning that phase 5 will carry forward.
+More decisions (monitoring/retraining approach, SHAP explanation target)
+will be documented here as phases 6-8 land.

@@ -1,3 +1,4 @@
-"""Feature prep, cross-validated LightGBM/XGBoost training, calibration, and
-MLflow logging. Filled in in Phase 5 (replaces the earlier top-level
-modeling/ package with proper CV and experiment tracking)."""
+"""Cross-validated model comparison (baseline logistic regression, LightGBM,
+XGBoost), champion selection, calibration, evaluation, and MLflow logging.
+See train.py for the entry point.
+"""
