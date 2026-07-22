@@ -23,6 +23,7 @@ tests/fixtures/
 # mlflow
 /mlruns/
 /mlartifacts/
+/mlflow.db
 
 # python
 __pycache__/

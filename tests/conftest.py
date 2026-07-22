@@ -1,7 +1,7 @@
 import duckdb
 import pytest
 
-from modeling import config
+from home_credit import config
 
 
 @pytest.fixture
