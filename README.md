@@ -1,5 +1,7 @@
 # Home Credit Default Risk
 
+[![CI](https://github.com/aakashkumar9/home-credit-default-risk/actions/workflows/ci.yml/badge.svg)](https://github.com/aakashkumar9/home-credit-default-risk/actions/workflows/ci.yml)
+
 **Problem.** Predict whether a loan applicant will default (`TARGET = 1`,
 ~8% of applicants) using the [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk)
 dataset. The applicant table alone is ~307k rows, but the real size - and
@@ -236,9 +238,19 @@ to categories with at least 20 applicants, so one outlier doesn't dominate).
    (`model_comparison`), one nested child run per model type with every
    fold's ROC-AUC/PR-AUC plus the mean/std, the champion's holdout metrics
    (both un/calibrated), and the calibration curve as a logged artifact.
-   Tracking store is local SQLite (`mlflow.db` - MLflow >=3 deprecated the
-   plain filesystem backend); view it with `mlflow ui --backend-store-uri
-   sqlite:///mlflow.db`.
+   The calibrated (served) model is also logged and registered in MLflow's
+   **model registry** under `home_credit_champion`
+   (`mlflow.sklearn.log_model(..., registered_model_name=...)`), giving a
+   versioned, queryable history of every model a training run has produced
+   - `models:/home_credit_champion/<version>` loads any of them back. This
+   is in addition to, not instead of, the local `calibrated_model.joblib`
+   file that `serving/api.py` and `dashboard/app.py` actually load at
+   startup - the registry is for lineage/versioning, the joblib file is the
+   fast, dependency-free serving path. Tracking store is local SQLite
+   (`mlflow.db` - MLflow >=3 deprecated the plain filesystem backend, and
+   the model registry specifically requires a database-backed store, which
+   the file backend never supported); view it with `mlflow ui
+   --backend-store-uri sqlite:///mlflow.db`.
 5. **`predict.py`** scores `application_test` with the calibrated champion
    and writes a Kaggle-format `reports/submission.csv`.
 
@@ -294,6 +306,16 @@ GET /predict/{sk_id_curr}   -> calibrated default probability
 GET /explain/{sk_id_curr}   -> base value + per-feature SHAP contributions
 ```
 
+```bash
+$ curl -s localhost:8000/predict/100001 | python -m json.tool
+{
+    "sk_id_curr": 100001,
+    "is_train": false,
+    "actual_target": null,
+    "probability": 0.25
+}
+```
+
 Scoring by ID against the mart rather than accepting raw applicant fields
 in the request body is a deliberate choice: the mart *is* the feature
 store (~130 engineered features aggregated from six history tables), and
@@ -315,6 +337,8 @@ the same public primitives from `home_credit.explain.shap_explainer` as
 the API (`load_champion`, `build_explainer`, `contributions_for_row`, ...)
 so the two serving surfaces never disagree on how a contribution is
 computed or formatted.
+
+![Dashboard: an applicant's calibrated probability, risk tier, and the SHAP drivers behind the score](docs/screenshots/dashboard.png)
 
 **Category-dtype consistency (train vs. serving).** Both the API and the
 dashboard score one applicant row at a time. Casting a single row to

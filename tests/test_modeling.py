@@ -1,3 +1,4 @@
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
@@ -110,6 +111,16 @@ def test_full_train_predict_pipeline_against_real_mart(mart_db_path, tmp_path, m
     assert (config.MODEL_DIR / "champion_model.joblib").exists()
     assert (config.MODEL_DIR / "calibrated_model.joblib").exists()
     assert (config.REPORTS_DIR / "calibration_curve.png").exists()
+
+    # the calibrated (served) model is also versioned through MLflow's model
+    # registry, in addition to the local joblib file api.py/dashboard actually load
+    client = mlflow.tracking.MlflowClient(tracking_uri=config.MLFLOW_TRACKING_URI)
+    versions = client.search_model_versions(f"name='{config.SERVING_MODEL_NAME}'")
+    assert len(versions) >= 1
+    registry_model = mlflow.sklearn.load_model(
+        f"models:/{config.SERVING_MODEL_NAME}/{versions[0].version}"
+    )
+    assert hasattr(registry_model, "predict_proba")
 
     submission = predict_mod.predict(mart_db_path)
     assert list(submission.columns) == ["SK_ID_CURR", "TARGET"]
