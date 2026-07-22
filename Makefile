@@ -1,4 +1,4 @@
-.PHONY: setup ingest dbt-build dbt-docs train serve-api dashboard test lint fmt docker-build docker-run
+.PHONY: setup ingest dbt-build dbt-docs eda train serve-api dashboard test lint fmt docker-build docker-run
 
 setup:  ## Install the package + dev tools (editable install)
 	pip install -e ".[dev]"
@@ -11,6 +11,9 @@ dbt-build:  ## Load raw data, then run dbt build (staging -> intermediate -> mar
 
 dbt-docs:  ## Serve dbt docs locally
 	cd warehouse && DBT_PROFILES_DIR=. dbt docs serve
+
+eda:  ## Regenerate docs/eda_summary.md from the built mart
+	python -m home_credit.eda
 
 train:  ## Run the full modelling pipeline (CV, calibration, MLflow logging)
 	python -m home_credit.modeling.run_pipeline
