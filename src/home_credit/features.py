@@ -18,9 +18,15 @@ def get_feature_columns(df: pd.DataFrame) -> list[str]:
 
 
 def split_column_types(df: pd.DataFrame, feature_cols: list[str]) -> tuple[list[str], list[str]]:
-    """Splits feature_cols into (numeric_cols, categorical_cols) by pandas dtype.
-    Boolean flag columns (has_bureau_history, etc.) count as categorical - a
-    handful of distinct values, not a magnitude to treat numerically.
+    """Splits feature_cols into (numeric_cols, categorical_cols) by pandas
+    dtype. Boolean flag columns (has_bureau_history, etc.) count as numeric,
+    not categorical: as a 0/1 value they scale/split identically to any
+    other numeric feature for every model here, and treating them as
+    categorical caused two real problems - XGBoost's native categorical
+    handling requires string-typed categories and crashes on boolean ones,
+    and mixing multiple 'category'-dtype columns of different underlying
+    value types (bool alongside string) hits a pandas/sklearn dtype-
+    promotion bug in SimpleImputer. Neither applies to plain numeric bools.
     """
     categorical_cols = [
         c
@@ -28,7 +34,6 @@ def split_column_types(df: pd.DataFrame, feature_cols: list[str]) -> tuple[list[
         if df[c].dtype == object
         or isinstance(df[c].dtype, pd.StringDtype)
         or pd.api.types.is_string_dtype(df[c].dtype)
-        or str(df[c].dtype) == "bool"
     ]
     numeric_cols = [c for c in feature_cols if c not in categorical_cols]
     return numeric_cols, categorical_cols

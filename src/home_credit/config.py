@@ -21,8 +21,18 @@ ID_COL = "sk_id_curr"
 TARGET_COL = "target"
 RANDOM_SEED = 42
 
+# --- modelling ---
+N_CV_SPLITS = 5  # stratified k-fold CV used to compare model types
+CALIBRATION_HOLDOUT_SIZE = 0.15  # held out from the full training set, never used in
+                                  # training the champion - used for calibration AND final evaluation
+INNER_VALID_SIZE = 0.1  # carved out of each tree model's own training data for early stopping,
+                         # so early stopping never peeks at the fold/holdout it's being scored on
+EARLY_STOPPING_ROUNDS = 50
+
 # --- experiment tracking ---
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", f"file:{REPO_ROOT / 'mlruns'}")
+# MLflow >=3 deprecated the plain filesystem backend ("file:./mlruns") in favor
+# of a database-backed store even for fully local use - sqlite needs no server.
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", f"sqlite:///{REPO_ROOT / 'mlflow.db'}")
 MLFLOW_EXPERIMENT_NAME = os.environ.get("MLFLOW_EXPERIMENT_NAME", "home-credit-default-risk")
 
 # --- serving ---
