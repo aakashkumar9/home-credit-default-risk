@@ -1,1 +1,1 @@
-"""Loads the raw Home Credit CSVs into DuckDB's `raw` schema. Filled in in Phase 2."""
+"""Loads the raw Home Credit CSVs into DuckDB's `raw` schema. See load_raw_data.py."""

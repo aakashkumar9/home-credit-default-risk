@@ -39,7 +39,7 @@ flowchart TD
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Project scaffold (`src/` layout, `pyproject.toml`, Makefile, README) | done |
-| 2 | Data ingestion into DuckDB (`home_credit.ingest`) | pending |
+| 2 | Data ingestion into DuckDB (`home_credit.ingest`) | done |
 | 3 | dbt transformation layer (staging -> intermediate -> marts) | **done** (built pre-scaffold, see below) |
 | 4 | Feature engineering + EDA summary | pending |
 | 5 | Modelling: baseline LR, LightGBM + XGBoost, stratified k-fold CV, calibration, MLflow | pending (an earlier single-split LightGBM version exists in the legacy `modeling/` package, superseded in this phase) |
@@ -60,14 +60,14 @@ described above.
 ```
 src/home_credit/       Installable package (pip install -e .)
   config.py             Central paths/constants - everything else imports from here
-  ingest/                Phase 2: raw CSV -> DuckDB
+  ingest/                done: raw CSV -> DuckDB, with schema/row-count/uniqueness checks
   validation/            Phase 8: pandera schemas
   modeling/              Phase 5: feature prep, CV training, calibration, MLflow logging
   explain/               Phase 6: SHAP
   serving/               Phase 7: FastAPI app
 dashboard/               Phase 7: Streamlit app
 warehouse/               dbt project: staging -> intermediate -> marts (done)
-scripts/                 load_raw_data.py, build_warehouse.sh
+scripts/                 build_warehouse.sh (ingest -> dbt build -> dbt docs generate)
 tests/                   pytest suite + synthetic fixture generator
 modeling/                Legacy pre-scaffold modelling code, superseded in phase 5
 data/raw/                Kaggle CSVs go here (gitignored)
@@ -93,6 +93,32 @@ data/raw/installments_payments.csv
 
 (`HomeCredit_columns_description.csv` and `sample_submission.csv`, also in
 the Kaggle download, aren't used by anything here.)
+
+## Data ingestion (done)
+
+`home_credit.ingest.load_raw_data` (`python -m home_credit.ingest.load_raw_data`,
+or `make ingest`) loads each CSV into DuckDB's `raw` schema untouched - dbt
+staging models do all renaming/typing, so ingestion's only job is getting
+the bytes in and catching a bad download early:
+
+- **Missing-file check** - lists every file still missing from `data/raw/`
+  and points at the Kaggle download page, rather than failing on the first
+  absent file.
+- **Schema check** - each table's grain/foreign-key columns
+  (`src/home_credit/ingest/schemas.py`) must actually exist in the loaded
+  CSV, so a renamed or reshuffled column fails here with a specific message
+  instead of as an obscure `dbt` compile error three layers downstream.
+- **Row-count and null checks** - a table that loads 0 rows, or has a null
+  in a column that's supposed to be a foreign key, fails immediately.
+- **Uniqueness check** - `application_train`/`application_test` on
+  `SK_ID_CURR` and `bureau` on `SK_ID_BUREAU` must actually be unique at
+  their claimed grain.
+
+This is deliberately lighter than the `dbt` tests one layer up (which also
+check cross-table `relationships` and `accepted_values`) and lighter still
+than the `pandera` validation phase 8 will add against the built mart - it
+exists to fail fast on "wrong file" / "truncated download", not to
+duplicate either of those.
 
 ## The dbt pipeline (done)
 
@@ -163,12 +189,13 @@ exercised without the (non-redistributable) Kaggle download:
 
 ```bash
 python tests/generate_synthetic_data.py         # writes tests/fixtures/raw/
-RAW_DIR=tests/fixtures/raw DUCKDB_PATH=/tmp/dev.duckdb python scripts/load_raw_data.py
+DATA_RAW_DIR=tests/fixtures/raw DUCKDB_PATH=/tmp/dev.duckdb python -m home_credit.ingest.load_raw_data
 DBT_PROFILES_DIR=warehouse DUCKDB_PATH=/tmp/dev.duckdb dbt build --project-dir warehouse
 ```
 
-This is exactly what CI (`.github/workflows/ci.yml`) does today; phase 8
-will extend it with lint and the full test suite once phases 2-7 land.
+This is exactly what CI (`.github/workflows/ci.yml`) does today, plus
+running the full `pytest` suite against the resulting warehouse; phase 8
+will extend it with lint once phases 4-7 land.
 
 ## Results
 
@@ -186,6 +213,13 @@ calibration curves) - not implemented yet._
 - **`src/` package layout.** Keeps the installable library
   (`home_credit`) separate from top-level scripts, tests, and the dbt
   project, and makes `pip install -e .` unambiguous about what's a package.
+- **Schema/row-count checks live in ingestion, not just in dbt.** A dbt
+  `not_null`/`unique` test only runs *after* `dbt build` has already parsed
+  and materialized every model - by the time it fails, the error is several
+  layers removed from "the CSV was wrong." Checking grain columns, row
+  counts, and uniqueness right after the raw load means a bad download
+  fails with a specific, immediate message instead of a confusing
+  downstream compile or test error.
 - **No feature store / Airflow.** The project is scoped to one batch
   build; orchestration beyond `scripts/build_warehouse.sh` would be
   solving a problem this dataset doesn't have.

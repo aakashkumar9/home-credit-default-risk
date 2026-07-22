@@ -5,7 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DBT_PROFILES_DIR="$REPO_ROOT/warehouse"
 
-python3 "$REPO_ROOT/scripts/load_raw_data.py"
+python3 -m home_credit.ingest.load_raw_data
 
 cd "$REPO_ROOT/warehouse"
 dbt build
