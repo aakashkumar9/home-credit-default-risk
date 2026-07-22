@@ -1,6 +1,7 @@
 """Scores application_test (is_train = false) with the calibrated champion
 model and writes a Kaggle-format submission.csv: SK_ID_CURR, TARGET.
 """
+
 import json
 
 import joblib
@@ -29,13 +30,17 @@ def predict(duckdb_path: str | None = None) -> pd.DataFrame:
     # feature_metadata.json), not derived fresh from application_test - see
     # prepare_tree_dtypes' docstring for why that consistency matters.
     if meta["champion_model"] != "logistic_regression":
-        score_df = prepare_tree_dtypes(score_df, categorical_cols, categories=meta["categorical_categories"])
+        score_df = prepare_tree_dtypes(
+            score_df, categorical_cols, categories=meta["categorical_categories"]
+        )
 
     proba = calibrated_model.predict_proba(score_df[feature_cols])[:, 1]
-    submission = pd.DataFrame({
-        "SK_ID_CURR": score_df[config.ID_COL].astype(int),
-        "TARGET": proba,
-    })
+    submission = pd.DataFrame(
+        {
+            "SK_ID_CURR": score_df[config.ID_COL].astype(int),
+            "TARGET": proba,
+        }
+    )
     submission.to_csv(config.REPORTS_DIR / "submission.csv", index=False)
     return submission
 

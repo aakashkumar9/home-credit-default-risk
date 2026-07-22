@@ -3,6 +3,7 @@ run constants. Every other module (ingest, modeling, serving, dashboard)
 imports from here rather than hardcoding paths, so moving the warehouse or
 switching environments is a one-file change.
 """
+
 import os
 from pathlib import Path
 
@@ -24,9 +25,9 @@ RANDOM_SEED = 42
 # --- modelling ---
 N_CV_SPLITS = 5  # stratified k-fold CV used to compare model types
 CALIBRATION_HOLDOUT_SIZE = 0.15  # held out from the full training set, never used in
-                                  # training the champion - used for calibration AND final evaluation
+# training the champion - used for calibration AND final evaluation
 INNER_VALID_SIZE = 0.1  # carved out of each tree model's own training data for early stopping,
-                         # so early stopping never peeks at the fold/holdout it's being scored on
+# so early stopping never peeks at the fold/holdout it's being scored on
 EARLY_STOPPING_ROUNDS = 50
 
 # --- experiment tracking ---

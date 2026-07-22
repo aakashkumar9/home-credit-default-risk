@@ -11,6 +11,7 @@ noise, not real default drivers. Re-run this against the real mart
 report; the point of committing a copy is to document the report's shape,
 not its numbers.
 """
+
 import warnings
 
 import pandas as pd
@@ -21,11 +22,15 @@ from home_credit.features import get_feature_columns, split_column_types
 DOCS_DIR = config.REPO_ROOT / "docs"
 
 
-def missingness_table(train_df: pd.DataFrame, feature_cols: list[str], top_n: int = 15) -> pd.Series:
+def missingness_table(
+    train_df: pd.DataFrame, feature_cols: list[str], top_n: int = 15
+) -> pd.Series:
     return train_df[feature_cols].isna().mean().sort_values(ascending=False).head(top_n)
 
 
-def numeric_target_correlation(train_df: pd.DataFrame, numeric_cols: list[str], top_n: int = 15) -> pd.Series:
+def numeric_target_correlation(
+    train_df: pd.DataFrame, numeric_cols: list[str], top_n: int = 15
+) -> pd.Series:
     # zero-variance columns (e.g. a constant flag in a small fixture) produce a
     # harmless 0/0 -> NaN correlation; dropna() already handles it correctly,
     # this just silences numpy's runtime warning about the division itself.
@@ -45,11 +50,13 @@ def categorical_target_spread(
         rates = rates[rates["count"] >= min_count]
         if rates.empty:
             continue
-        rows.append({
-            "column": col,
-            "spread": rates["mean"].max() - rates["mean"].min(),
-            "n_categories": len(rates),
-        })
+        rows.append(
+            {
+                "column": col,
+                "spread": rates["mean"].max() - rates["mean"].min(),
+                "n_categories": len(rates),
+            }
+        )
     if not rows:
         return pd.DataFrame(columns=["column", "spread", "n_categories"])
     return pd.DataFrame(rows).sort_values("spread", ascending=False).head(top_n)
@@ -104,7 +111,8 @@ def generate_report(duckdb_path: str | None = None) -> str:
         "|---|---|---|",
     ]
     lines += [
-        f"| `{row.column}` | {row.spread:.1%} | {int(row.n_categories)} |" for row in cat_spread.itertuples()
+        f"| `{row.column}` | {row.spread:.1%} | {int(row.n_categories)} |"
+        for row in cat_spread.itertuples()
     ]
 
     return "\n".join(lines) + "\n"

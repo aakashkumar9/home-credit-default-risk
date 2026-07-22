@@ -7,15 +7,17 @@ from home_credit import features
 
 @pytest.fixture
 def sample_df():
-    return pd.DataFrame({
-        "sk_id_curr": [1, 2, 3, 4],
-        "target": [0, 1, 0, 1],
-        "is_train": [True, True, True, True],
-        "amt_income": [50000.0, np.nan, 70000.0, 65000.0],
-        "age_years": [30.0, 45.0, np.nan, 28.0],
-        "gender": ["M", "F", "M", None],
-        "has_bureau_history": [True, False, True, True],
-    })
+    return pd.DataFrame(
+        {
+            "sk_id_curr": [1, 2, 3, 4],
+            "target": [0, 1, 0, 1],
+            "is_train": [True, True, True, True],
+            "amt_income": [50000.0, np.nan, 70000.0, 65000.0],
+            "age_years": [30.0, 45.0, np.nan, 28.0],
+            "gender": ["M", "F", "M", None],
+            "has_bureau_history": [True, False, True, True],
+        }
+    )
 
 
 def test_get_feature_columns_excludes_id_target_is_train(sample_df):
@@ -84,11 +86,13 @@ def test_linear_preprocessor_handles_missing_values_and_unseen_categories(sample
     assert not np.isnan(transformed).any()
 
     # a category never seen in training shouldn't crash transform
-    X_new = pd.DataFrame({
-        "amt_income": [80000.0],
-        "age_years": [40.0],
-        "gender": ["XNA"],
-        "has_bureau_history": [False],
-    })
+    X_new = pd.DataFrame(
+        {
+            "amt_income": [80000.0],
+            "age_years": [40.0],
+            "gender": ["XNA"],
+            "has_bureau_history": [False],
+        }
+    )
     transformed_new = preprocessor.transform(X_new)
     assert not np.isnan(transformed_new).any()

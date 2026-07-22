@@ -15,6 +15,7 @@ compare model types in cv.py. On a small holdout (as with the synthetic
 test fixtures) sklearn may warn that a fold has too few minority-class
 examples; with real data's full holdout size this doesn't occur.
 """
+
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.frozen import FrozenEstimator
 
@@ -23,6 +24,8 @@ def calibrate(fitted_model, X_holdout, y_holdout) -> CalibratedClassifierCV:
     """fitted_model must expose `.sklearn_estimator` (see models.py) - the
     underlying fitted sklearn-compatible classifier to wrap and calibrate.
     """
-    calibrated = CalibratedClassifierCV(FrozenEstimator(fitted_model.sklearn_estimator), method="isotonic")
+    calibrated = CalibratedClassifierCV(
+        FrozenEstimator(fitted_model.sklearn_estimator), method="isotonic"
+    )
     calibrated.fit(X_holdout, y_holdout)
     return calibrated

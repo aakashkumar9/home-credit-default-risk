@@ -4,6 +4,7 @@ fit(X, y)/predict_proba(X) interface in models.py), so the same loop
 compares the baseline logistic regression, LightGBM, and XGBoost without
 knowing anything about their internals.
 """
+
 from dataclasses import dataclass, field
 from typing import Callable
 

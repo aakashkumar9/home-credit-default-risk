@@ -23,6 +23,7 @@ a tree model reliably outperforms the linear baseline in practice anyway,
 so `train()` raises a clear `NotImplementedError` rather than silently
 running a fallback that's actually broken.
 """
+
 import json
 
 import joblib
@@ -85,7 +86,9 @@ def compute_shap(champion_type: str, champion, X: pd.DataFrame):
     """
     explainer = build_explainer(champion_type, champion)
     explanation = explainer(X)
-    return positive_class_values(explanation.values), positive_class_base_value(explanation.base_values)
+    return positive_class_values(explanation.values), positive_class_base_value(
+        explanation.base_values
+    )
 
 
 def compute_global_importance(duckdb_path: str | None = None, sample_size: int = 2000):
@@ -99,7 +102,9 @@ def compute_global_importance(duckdb_path: str | None = None, sample_size: int =
     df = data.load_mart(duckdb_path)
     train_df, _ = data.split_train_score(df)
     if champion_type in TREE_MODEL_NAMES:
-        train_df = prepare_tree_dtypes(train_df, categorical_cols, categories=meta["categorical_categories"])
+        train_df = prepare_tree_dtypes(
+            train_df, categorical_cols, categories=meta["categorical_categories"]
+        )
 
     sample = train_df.sample(n=min(sample_size, len(train_df)), random_state=config.RANDOM_SEED)
     X_sample = sample[feature_cols]
@@ -162,14 +167,18 @@ def explain_applicant(sk_id_curr: int, duckdb_path: str | None = None) -> dict:
         "sk_id_curr": int(sk_id_curr),
         "base_value": base_value,
         "predicted_score": base_value + float(shap_row.sum()),
-        "contributions": contributions_for_row(feature_cols, row[feature_cols].iloc[0].to_numpy(), shap_row),
+        "contributions": contributions_for_row(
+            feature_cols, row[feature_cols].iloc[0].to_numpy(), shap_row
+        ),
     }
 
 
 def main():
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     mean_abs_shap, X_sample, shap_matrix = compute_global_importance()
-    mean_abs_shap.to_csv(config.REPORTS_DIR / "shap_feature_importance.csv", header=["mean_abs_shap"])
+    mean_abs_shap.to_csv(
+        config.REPORTS_DIR / "shap_feature_importance.csv", header=["mean_abs_shap"]
+    )
     plot_global_summary(X_sample, shap_matrix, config.REPORTS_DIR / "shap_summary.png")
     print(
         f"Wrote {config.REPORTS_DIR / 'shap_feature_importance.csv'} "
