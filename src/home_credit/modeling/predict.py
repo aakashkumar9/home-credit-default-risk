@@ -25,9 +25,11 @@ def predict(duckdb_path: str | None = None) -> pd.DataFrame:
     # expect it at predict time too. The logistic regression's own pipeline
     # (bundled inside the calibrated model) does its own preprocessing on raw
     # dtypes - see train.py's module docstring for why it can't take the
-    # category-cast frame.
+    # category-cast frame. Categories come from training (persisted in
+    # feature_metadata.json), not derived fresh from application_test - see
+    # prepare_tree_dtypes' docstring for why that consistency matters.
     if meta["champion_model"] != "logistic_regression":
-        score_df = prepare_tree_dtypes(score_df, categorical_cols)
+        score_df = prepare_tree_dtypes(score_df, categorical_cols, categories=meta["categorical_categories"])
 
     proba = calibrated_model.predict_proba(score_df[feature_cols])[:, 1]
     submission = pd.DataFrame({

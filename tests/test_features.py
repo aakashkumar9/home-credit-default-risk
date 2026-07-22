@@ -40,6 +40,40 @@ def test_prepare_tree_dtypes_casts_categoricals_only(sample_df):
     assert out["amt_income"].dtype != "category"
 
 
+def test_extract_categories_captures_full_training_universe(sample_df):
+    feature_cols = features.get_feature_columns(sample_df)
+    _, categorical_cols = features.split_column_types(sample_df, feature_cols)
+    categories = features.extract_categories(sample_df, categorical_cols)
+    assert categories == {"gender": ["F", "M"]}
+
+
+def test_prepare_tree_dtypes_with_persisted_categories_on_a_single_null_row(sample_df):
+    """Regression test: casting a single row (or any small slice) to
+    'category' dtype without persisted categories derives categories from
+    only what's present in that slice - zero categories if the value is
+    null, which crashed XGBoost's native categorical handling at serving
+    time (single-applicant lookups in the API and dashboard). Passing the
+    categories captured from the full training set must avoid this
+    regardless of what a given row's value happens to be.
+    """
+    feature_cols = features.get_feature_columns(sample_df)
+    _, categorical_cols = features.split_column_types(sample_df, feature_cols)
+    categories = features.extract_categories(sample_df, categorical_cols)
+
+    null_gender_row = sample_df.iloc[[3]]  # gender is None for this row
+    assert null_gender_row["gender"].isna().all()
+
+    # without persisted categories: derived from this one (null) row -> zero categories
+    naive = features.prepare_tree_dtypes(null_gender_row, categorical_cols)
+    assert len(naive["gender"].cat.categories) == 0
+
+    # with persisted categories: the full training-set category universe, even
+    # though this particular row's value is null
+    fixed = features.prepare_tree_dtypes(null_gender_row, categorical_cols, categories=categories)
+    assert list(fixed["gender"].cat.categories) == ["F", "M"]
+    assert fixed["gender"].isna().all()  # the row's own value is still correctly null
+
+
 def test_linear_preprocessor_handles_missing_values_and_unseen_categories(sample_df):
     feature_cols = features.get_feature_columns(sample_df)
     numeric_cols, categorical_cols = features.split_column_types(sample_df, feature_cols)

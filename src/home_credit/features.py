@@ -39,16 +39,38 @@ def split_column_types(df: pd.DataFrame, feature_cols: list[str]) -> tuple[list[
     return numeric_cols, categorical_cols
 
 
-def prepare_tree_dtypes(df: pd.DataFrame, categorical_cols: list[str]) -> pd.DataFrame:
+def prepare_tree_dtypes(
+    df: pd.DataFrame, categorical_cols: list[str], categories: dict[str, list] | None = None
+) -> pd.DataFrame:
     """For LightGBM/XGBoost: cast categorical columns to pandas 'category' dtype
     so they're split on natively. Missing values (numeric and categorical) are
     left as NaN / a missing category - both models split on missingness
     natively, and imputing here would just destroy that signal.
+
+    Pass `categories` (from `extract_categories`, captured once against the
+    full training set and persisted in feature_metadata.json) for any call
+    on fewer rows than the model was trained on - a single applicant's row,
+    for instance. Deriving categories fresh from a 1-row slice would only
+    "see" whatever value is in that row (zero categories if it's null),
+    which is inconsistent with the category encoding the model actually
+    learned and can silently score wrong, not just crash - confirmed by
+    hitting exactly that crash in single-row inference before this existed.
     """
     df = df.copy()
     for col in categorical_cols:
-        df[col] = df[col].astype("category")
+        if categories is not None:
+            df[col] = pd.Categorical(df[col], categories=categories[col])
+        else:
+            df[col] = df[col].astype("category")
     return df
+
+
+def extract_categories(df: pd.DataFrame, categorical_cols: list[str]) -> dict[str, list]:
+    """Captures each categorical column's category levels from a (typically
+    full-training-set) frame, to be persisted and reused via
+    prepare_tree_dtypes' `categories` argument at inference time.
+    """
+    return {col: df[col].astype("category").cat.categories.tolist() for col in categorical_cols}
 
 
 def build_linear_preprocessor(numeric_cols: list[str], categorical_cols: list[str]) -> ColumnTransformer:

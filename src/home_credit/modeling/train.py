@@ -17,7 +17,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from home_credit import config, data
-from home_credit.features import get_feature_columns, prepare_tree_dtypes, split_column_types
+from home_credit.features import extract_categories, get_feature_columns, prepare_tree_dtypes, split_column_types
 from home_credit.modeling import calibrate as calibrate_mod
 from home_credit.modeling import evaluate as evaluate_mod
 from home_credit.modeling.cv import cross_validate
@@ -59,6 +59,12 @@ def train(duckdb_path: str | None = None) -> dict:
     # doesn't hit it, and OneHotEncoder/SimpleImputer don't need 'category'
     # dtype to work correctly anyway.
     tree_df = prepare_tree_dtypes(train_df, categorical_cols)
+    # Captured once here, from the full training set, and persisted below -
+    # every later single-row inference (predict.py, explain.py, the API,
+    # the dashboard) must reuse these exact categories rather than deriving
+    # fresh ones from whatever row(s) it happens to see. See
+    # prepare_tree_dtypes' docstring for why that matters.
+    categorical_categories = extract_categories(train_df, categorical_cols)
     y = train_df[config.TARGET_COL].astype(int)
 
     def model_frame(model_name: str) -> pd.DataFrame:
@@ -127,6 +133,7 @@ def train(duckdb_path: str | None = None) -> dict:
                     "feature_cols": feature_cols,
                     "numeric_cols": numeric_cols,
                     "categorical_cols": categorical_cols,
+                    "categorical_categories": categorical_categories,
                     "champion_model": champion_name,
                 },
                 f,
